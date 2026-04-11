@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block content %}
+<ul class="nav nav-tabs mb-4" id="settingsTabs" role="tablist">
+    {% for tab_id, tab_name, _ in settings_tabs %}
+    <li class="nav-item">
+        <button class="nav-link {% if loop.first %}active{% endif %}" 
+                data-bs-toggle="tab" 
+                data-bs-target="#settings-{{ tab_id }}">
+            {{ tab_name }}
+        </button>
+    </li>
+    {% endfor %}
+</ul>
+
+<div class="tab-content">
+    {% for tab_id, _, content in settings_tabs %}
+    <div class="tab-pane fade {% if loop.first %}show active{% endif %}" 
+         id="settings-{{ tab_id }}">
+        <div class="card">
+            <div class="card-body">
+                {{ content|safe }}
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<script>
+    function showNotification(message, type) {
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type} position-fixed top-0 end-0 m-3`;
+        notification.style.zIndex = '9999';
+        notification.style.animation = 'fadeIn 0.3s ease';
+        notification.style.background = type === 'success' ? '#10b981' : (type === 'error' ? '#ef4444' : '#3b82f6');
+        notification.style.color = '#ffffff';
+        notification.style.padding = '10px 20px';
+        notification.style.borderRadius = '10px';
+        notification.innerHTML = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+    }
+</script>
+{% endblock %}

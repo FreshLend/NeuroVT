@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <ul class="nav nav-tabs mb-4" id="mainTabs" role="tablist">
+            {% for tab_id, tab_name, _ in tabs %}
+            <li class="nav-item" role="presentation">
+                <button class="nav-link {% if loop.first %}active{% endif %}" 
+                        id="tab-{{ tab_id }}-btn" 
+                        data-bs-toggle="tab" 
+                        data-bs-target="#tab-{{ tab_id }}" 
+                        type="button" 
+                        role="tab">
+                    <i class="fas fa-{% if tab_name == 'Чат с AI' %}comment{% elif tab_name == 'YouTube чат' %}youtube{% else %}plug{% endif %} me-2"></i>
+                    {{ tab_name }}
+                </button>
+            </li>
+            {% endfor %}
+        </ul>
+        
+        <div class="tab-content" id="mainTabsContent">
+            {% for tab_id, tab_name, content in tabs %}
+            <div class="tab-pane fade {% if loop.first %}show active{% endif %}" 
+                 id="tab-{{ tab_id }}" 
+                 role="tabpanel">
+                {{ content|safe }}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>
+{% endblock %}
