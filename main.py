@@ -54,6 +54,7 @@ def save_all_settings():
                             json.dump(current, f, indent=2, ensure_ascii=False)
                     except:
                         pass
+        app.config['SETTINGS'] = load_global_settings()
         return jsonify({"status": "ok", "message": "Все настройки сохранены"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500

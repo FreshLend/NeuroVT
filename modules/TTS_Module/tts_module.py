@@ -4,7 +4,7 @@ import torch
 import io
 import wave
 import numpy as np
-import base64
+import pyaudio
 import time
 from modules.base_module import BaseModule
 from flask import jsonify, request
@@ -12,7 +12,7 @@ from datetime import datetime
 
 class TTSModule(BaseModule):
     name = "tts"
-    display_name = "TTS Озвучка (Silero)"
+    display_name = "TTS (Silero)"
     
     VOICES = {
         "aidar": "Айдар (мужской)",
@@ -27,7 +27,7 @@ class TTSModule(BaseModule):
         self.model = None
         self.model_loaded = False
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.sample_rate = 48000
+        self.sample_rate = 24000
         self.speaker = "xenia"
         
         self.message_queue = queue.Queue()
@@ -35,7 +35,18 @@ class TTSModule(BaseModule):
         self.speech_history = []
         self.total_processed = 0
         
+        self.pyaudio_instance = None
+        self.audio_stream = None
+        
         self.load_settings()
+        self.init_pyaudio()
+    
+    def init_pyaudio(self):
+        try:
+            self.pyaudio_instance = pyaudio.PyAudio()
+            print(f"[TTS] PyAudio инициализирован")
+        except Exception as e:
+            print(f"[TTS] Ошибка инициализации PyAudio: {e}")
     
     def load_settings(self):
         settings = self.load_module_settings()
@@ -145,9 +156,25 @@ class TTSModule(BaseModule):
         
         if all_audio:
             combined = b''.join(all_audio)
-            return base64.b64encode(combined).decode('utf-8'), total_duration
+            return combined, total_duration
         
         return None, 0
+    
+    def play_audio(self, audio_bytes):
+        try:
+            if self.audio_stream is None:
+                self.audio_stream = self.pyaudio_instance.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=self.sample_rate,
+                    output=True,
+                    frames_per_buffer=1024
+                )
+            
+            self.audio_stream.write(audio_bytes)
+            
+        except Exception as e:
+            print(f"[TTS] Ошибка воспроизведения: {e}")
     
     def tensor_to_wav(self, audio_tensor, sample_rate):
         try:
@@ -161,15 +188,7 @@ class TTSModule(BaseModule):
                 audio_np = audio_np / max_val
             audio_int16 = (audio_np * 32767).astype(np.int16)
             
-            buffer = io.BytesIO()
-            with wave.open(buffer, 'wb') as wav:
-                wav.setnchannels(1)
-                wav.setsampwidth(2)
-                wav.setframerate(sample_rate)
-                wav.writeframes(audio_int16.tobytes())
-            
-            buffer.seek(0)
-            return buffer.read()
+            return audio_int16.tobytes()
             
         except Exception as e:
             print(f"[TTS] Ошибка конвертации: {e}")
@@ -196,16 +215,11 @@ class TTSModule(BaseModule):
                 })
                 
                 start_time = time.time()
-                audio_base64, duration = self.text_to_speech(text)
+                audio_data, duration = self.text_to_speech(text)
                 generation_time = time.time() - start_time
                 
-                if audio_base64:
-                    self.event_bus.emit("tts_audio_ready", {
-                        "audio": audio_base64,
-                        "text": text,
-                        "source": source,
-                        "timestamp": datetime.now().isoformat()
-                    })
+                if audio_data:
+                    self.play_audio(audio_data)
                     
                     self.speech_history.append({
                         "text": text,
@@ -219,7 +233,7 @@ class TTSModule(BaseModule):
                     self.total_processed += 1
                     print(f"[TTS] Готово за {generation_time:.2f}с")
                     
-                    time.sleep(duration + 0.2)
+                    time.sleep(0.1)
                 else:
                     self.speech_history.append({
                         "text": text,
@@ -311,7 +325,7 @@ class TTSModule(BaseModule):
     
     def register_main_tab(self):
         return ("TTS Статус", f"""
-        <div class="row">
+        <div class="row" id="tts-module-container">
             <div class="col-md-6">
                 <div class="card mb-3">
                     <div class="card-header">Статус озвучки</div>
@@ -322,13 +336,13 @@ class TTSModule(BaseModule):
                         </div>
                         <div class="mb-2">
                             <strong>Очередь:</strong>
-                            <span id="queueSize">0</span>
-                            <button class="btn btn-sm btn-danger ms-2" onclick="clearQueue()">Очистить</button>
+                            <span id="ttsQueueSize">0</span>
+                            <button class="btn btn-sm btn-danger ms-2" onclick="ttsClearQueue()">Очистить</button>
                         </div>
-                        <div class="mb-2"><strong>Всего озвучено:</strong> <span id="totalProcessed">0</span></div>
-                        <div class="mb-2"><strong>Голос:</strong> <span id="currentVoice">-</span></div>
-                        <div class="mb-2"><strong>Качество:</strong> <span id="quality">-</span></div>
-                        <button class="btn btn-primary" onclick="testTTS()">Тест озвучки</button>
+                        <div class="mb-2"><strong>Всего озвучено:</strong> <span id="ttsTotalProcessed">0</span></div>
+                        <div class="mb-2"><strong>Голос:</strong> <span id="ttsCurrentVoice">-</span></div>
+                        <div class="mb-2"><strong>Качество:</strong> <span id="ttsQuality">-</span></div>
+                        <button class="btn btn-primary" onclick="ttsTest()">Тест озвучки</button>
                     </div>
                 </div>
             </div>
@@ -336,7 +350,7 @@ class TTSModule(BaseModule):
             <div class="col-md-6">
                 <div class="card">
                     <div class="card-header">История</div>
-                    <div class="card-body" id="historyList" style="max-height: 400px; overflow-y: auto;">
+                    <div class="card-body" id="ttsHistoryList" style="max-height: 400px; overflow-y: auto;">
                         <div class="text-muted text-center">Нет сообщений</div>
                     </div>
                 </div>
@@ -344,30 +358,9 @@ class TTSModule(BaseModule):
         </div>
         
         <script>
-            let eventSource = null;
-            let updateInterval = null;
+            let ttsUpdateInterval = null;
             
-            function initTTS() {{
-                eventSource = new EventSource('/api/tts/stream');
-                eventSource.onmessage = function(event) {{
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'audio') {{
-                        const binaryString = atob(data.audio);
-                        const bytes = new Uint8Array(binaryString.length);
-                        for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
-                        const audioBlob = new Blob([bytes], {{type: 'audio/wav'}});
-                        const audioUrl = URL.createObjectURL(audioBlob);
-                        const audio = new Audio(audioUrl);
-                        audio.onended = () => URL.revokeObjectURL(audioUrl);
-                        audio.play();
-                    }}
-                }};
-                
-                updateStatus();
-                updateInterval = setInterval(updateStatus, 1000);
-            }}
-            
-            async function updateStatus() {{
+            async function ttsUpdateStatus() {{
                 try {{
                     const response = await fetch('/api/tts/status');
                     const data = await response.json();
@@ -378,12 +371,12 @@ class TTSModule(BaseModule):
                     else if (data.queue_size > 0) statusBadge.innerHTML = `В очереди: ${{data.queue_size}}`;
                     else statusBadge.innerHTML = 'Готов';
                     
-                    document.getElementById('queueSize').innerHTML = data.queue_size;
-                    document.getElementById('totalProcessed').innerHTML = data.total_processed;
-                    document.getElementById('currentVoice').innerHTML = data.current_voice;
-                    document.getElementById('quality').innerHTML = (data.sample_rate / 1000) + ' кГц';
+                    document.getElementById('ttsQueueSize').innerHTML = data.queue_size;
+                    document.getElementById('ttsTotalProcessed').innerHTML = data.total_processed;
+                    document.getElementById('ttsCurrentVoice').innerHTML = data.current_voice;
+                    document.getElementById('ttsQuality').innerHTML = (data.sample_rate / 1000) + ' кГц';
                     
-                    const historyList = document.getElementById('historyList');
+                    const historyList = document.getElementById('ttsHistoryList');
                     if (data.history.length === 0) {{
                         historyList.innerHTML = '<div class="text-muted text-center">Нет сообщений</div>';
                     }} else {{
@@ -395,7 +388,7 @@ class TTSModule(BaseModule):
                                         ${{item.status === 'completed' ? 'Озвучено' : 'Ошибка'}}
                                     </small>
                                 </div>
-                                <div class="mt-1 small">${{escapeHtml(item.text.substring(0, 100))}}</div>
+                                <div class="mt-1 small">${{ttsEscapeHtml(item.text.substring(0, 100))}}</div>
                             </div>
                         `).join('');
                     }}
@@ -404,13 +397,13 @@ class TTSModule(BaseModule):
                 }}
             }}
             
-            async function clearQueue() {{
+            async function ttsClearQueue() {{
                 if (confirm('Очистить очередь?')) {{
                     await fetch('/api/tts/queue/clear', {{method: 'POST'}});
                 }}
             }}
             
-            async function testTTS() {{
+            async function ttsTest() {{
                 const text = prompt('Введите текст:', 'Привет! Это тестовая озвучка.');
                 if (text) {{
                     await fetch('/api/tts/test', {{
@@ -421,16 +414,20 @@ class TTSModule(BaseModule):
                 }}
             }}
             
-            function escapeHtml(text) {{
+            function ttsEscapeHtml(text) {{
                 const div = document.createElement('div');
                 div.textContent = text;
                 return div.innerHTML;
             }}
             
-            initTTS();
+            window.ttsClearQueue = ttsClearQueue;
+            window.ttsTest = ttsTest;
+            
+            ttsUpdateInterval = setInterval(ttsUpdateStatus, 1000);
+            ttsUpdateStatus();
+            
             window.addEventListener('beforeunload', () => {{
-                if (updateInterval) clearInterval(updateInterval);
-                if (eventSource) eventSource.close();
+                if (ttsUpdateInterval) clearInterval(ttsUpdateInterval);
             }});
         </script>
         """)
@@ -445,11 +442,11 @@ class TTSModule(BaseModule):
         quality_selected_48 = "selected" if self.sample_rate == 48000 else ""
         
         return f"""
-        <div class="row">
+        <div class="row" id="tts-settings-container">
             <div class="col-md-6">
                 <div class="mb-3">
                     <label class="form-label">Голос (автосохранение)</label>
-                    <select class="form-select" id="voiceSelect" onchange="changeVoice()">
+                    <select class="form-select" id="ttsVoiceSelect" onchange="ttsChangeVoice()">
                         {voice_options}
                     </select>
                 </div>
@@ -458,7 +455,7 @@ class TTSModule(BaseModule):
             <div class="col-md-6">
                 <div class="mb-3">
                     <label class="form-label">Качество (автосохранение)</label>
-                    <select class="form-select" id="qualitySelect" onchange="changeQuality()">
+                    <select class="form-select" id="ttsQualitySelect" onchange="ttsChangeQuality()">
                         <option value="24000" {quality_selected_24}>Стандартное (24 кГц)</option>
                         <option value="48000" {quality_selected_48}>Высокое (48 кГц)</option>
                     </select>
@@ -466,20 +463,20 @@ class TTSModule(BaseModule):
             </div>
         </div>
         
-        <div class="alert alert-info" id="currentSettings">Загрузка...</div>
+        <div class="alert alert-info" id="ttsCurrentSettings">Загрузка...</div>
         
         <script>
-            async function loadSettings() {{
+            async function ttsLoadSettings() {{
                 const response = await fetch('/api/tts/get_settings');
                 const data = await response.json();
-                document.getElementById('currentSettings').innerHTML = `
+                document.getElementById('ttsCurrentSettings').innerHTML = `
                     <i class="fas fa-info-circle me-2"></i>
                     Текущие: голос ${{data.voice_name}}, качество ${{data.quality}}
                 `;
             }}
             
-            async function changeVoice() {{
-                const voice = document.getElementById('voiceSelect').value;
+            async function ttsChangeVoice() {{
+                const voice = document.getElementById('ttsVoiceSelect').value;
                 const response = await fetch('/api/tts/voice', {{
                     method: 'POST',
                     headers: {{'Content-Type': 'application/json'}},
@@ -487,13 +484,13 @@ class TTSModule(BaseModule):
                 }});
                 const data = await response.json();
                 if (data.status === 'ok') {{
-                    showNotification('Голос изменён', 'success');
-                    loadSettings();
+                    ttsShowNotification('Голос изменён', 'success');
+                    ttsLoadSettings();
                 }}
             }}
             
-            async function changeQuality() {{
-                const quality = parseInt(document.getElementById('qualitySelect').value);
+            async function ttsChangeQuality() {{
+                const quality = parseInt(document.getElementById('ttsQualitySelect').value);
                 const response = await fetch('/api/tts/quality', {{
                     method: 'POST',
                     headers: {{'Content-Type': 'application/json'}},
@@ -501,12 +498,12 @@ class TTSModule(BaseModule):
                 }});
                 const data = await response.json();
                 if (data.status === 'ok') {{
-                    showNotification('Качество изменено', 'success');
-                    loadSettings();
+                    ttsShowNotification('Качество изменено', 'success');
+                    ttsLoadSettings();
                 }}
             }}
             
-            function showNotification(message, type) {{
+            function ttsShowNotification(message, type) {{
                 const notification = document.createElement('div');
                 notification.className = `alert alert-${{type}} position-fixed top-0 end-0 m-3`;
                 notification.style.zIndex = '9999';
@@ -517,7 +514,10 @@ class TTSModule(BaseModule):
                 setTimeout(() => notification.remove(), 2000);
             }}
             
-            loadSettings();
+            window.ttsChangeVoice = ttsChangeVoice;
+            window.ttsChangeQuality = ttsChangeQuality;
+            
+            ttsLoadSettings();
         </script>
         """
     

@@ -32,7 +32,7 @@ class LLMModule(BaseModule):
     
     DEFAULT_TEMPERATURE = 0.7
     DEFAULT_MAX_TOKENS = 512
-    DEFAULT_SYSTEM_PROMPT = "Ты дружелюбный AI Vtuber. Отвечай кратко, эмоционально и с юмором, если говорят что-то что тебе не нравиться то злись или отшучивайся. Не используй эмодзи."
+    DEFAULT_SYSTEM_PROMPT = "Ты дружелюбный ИИ Втубер. Отвечай кратко, эмоционально и с юмором."
     DEFAULT_MODEL = "openrouter/free"
     
     def __init__(self, app, event_bus):
@@ -500,18 +500,18 @@ class LLMModule(BaseModule):
 
     def register_main_tab(self):
         return ("Чат с AI", """
-        <div class="row">
+        <div class="row" id="llm-module-container">
             <div class="col-md-4">
                 <div class="card mb-3">
                     <div class="card-header">
                         <i class="fas fa-comments me-2"></i>
                         Сессии чатов
-                        <button class="btn btn-sm btn-primary float-end" onclick="createNewSession()">
+                        <button class="btn btn-sm btn-primary float-end" onclick="llmCreateNewSession()">
                             <i class="fas fa-plus"></i>
                         </button>
                     </div>
                     <div class="card-body" style="max-height: 500px; overflow-y: auto; padding: 0;">
-                        <div id="sessionsList" class="list-group list-group-flush">
+                        <div id="llmSessionsList" class="list-group list-group-flush">
                             <div class="text-center p-3">Загрузка...</div>
                         </div>
                     </div>
@@ -523,32 +523,32 @@ class LLMModule(BaseModule):
                     <div class="card-header d-flex justify-content-between align-items-center">
                         <span>
                             <i class="fas fa-comment me-2"></i>
-                            <span id="currentSessionName">Загрузка...</span>
+                            <span id="llmCurrentSessionName">Загрузка...</span>
                         </span>
                         <div>
-                            <span class="badge bg-info me-2" id="currentModelBadge">Загрузка...</span>
-                            <span class="badge bg-secondary me-2" id="contextSizeBadge">0 сообщений</span>
-                            <button class="btn btn-sm btn-outline-danger" onclick="clearCurrentSession()" title="Очистить историю">
+                            <span class="badge bg-info me-2" id="llmCurrentModelBadge">Загрузка...</span>
+                            <span class="badge bg-secondary me-2" id="llmContextSizeBadge">0 сообщений</span>
+                            <button class="btn btn-sm btn-outline-danger" onclick="llmClearCurrentSession()" title="Очистить историю">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </div>
                     </div>
                     <div class="card-body">
-                        <div id="apiErrorAlert" class="alert alert-danger mb-3" style="display: none;">
+                        <div id="llmApiErrorAlert" class="alert alert-danger mb-3" style="display: none;">
                             <i class="fas fa-exclamation-triangle me-2"></i>
-                            <span id="apiErrorMessage"></span>
+                            <span id="llmApiErrorMessage"></span>
                         </div>
                         
-                        <div class="chat-log" id="chatMessages" style="height: 400px; overflow-y: auto;">
+                        <div class="chat-log" id="llmChatMessages" style="height: 400px; overflow-y: auto;">
                             <div class="text-center text-muted p-3">Выберите сессию или создайте новую</div>
                         </div>
                         
                         <div class="mt-3">
                             <div class="input-group">
-                                <textarea class="form-control" id="messageInput" rows="2" 
+                                <textarea class="form-control" id="llmMessageInput" rows="2" 
                                           placeholder="Напишите сообщение... (Enter - отправить)"
                                           style="resize: none;"></textarea>
-                                <button class="btn btn-primary" onclick="sendMessage()">
+                                <button class="btn btn-primary" onclick="llmSendMessage()">
                                     <i class="fas fa-paper-plane"></i> Отправить
                                 </button>
                             </div>
@@ -559,51 +559,51 @@ class LLMModule(BaseModule):
         </div>
         
         <script>
-            let currentSessionId = null;
-            let sessions = [];
-            let currentModel = null;
+            let llmCurrentSessionId = null;
+            let llmSessions = [];
+            let llmCurrentModel = null;
             
-            async function loadCurrentModel() {
+            async function llmLoadCurrentModel() {
                 try {
                     const response = await fetch('/api/llm/get_settings');
                     const data = await response.json();
-                    currentModel = data.model;
+                    llmCurrentModel = data.model;
                     const modelName = data.models[data.model] || data.model;
-                    document.getElementById('currentModelBadge').innerHTML = '<i class="fas fa-brain me-1"></i>' + modelName;
+                    document.getElementById('llmCurrentModelBadge').innerHTML = '<i class="fas fa-brain me-1"></i>' + modelName;
                 } catch(e) {
                     console.error('Ошибка загрузки модели:', e);
                 }
             }
             
-            async function loadSessions() {
+            async function llmLoadSessions() {
                 try {
                     const response = await fetch('/api/llm/sessions');
                     const data = await response.json();
-                    sessions = data.sessions;
-                    currentSessionId = data.current_id;
+                    llmSessions = data.sessions;
+                    llmCurrentSessionId = data.current_id;
                     
-                    const sessionsList = document.getElementById('sessionsList');
-                    if (sessions.length === 0) {
+                    const sessionsList = document.getElementById('llmSessionsList');
+                    if (llmSessions.length === 0) {
                         sessionsList.innerHTML = '<div class="text-center text-muted p-3">Нет сессий</div>';
                         return;
                     }
                     
-                    sessionsList.innerHTML = sessions.map(session => `
+                    sessionsList.innerHTML = llmSessions.map(session => `
                         <div class="list-group-item list-group-item-action ${session.is_current ? 'active' : ''}" 
                              style="background: ${session.is_current ? 'rgba(99, 102, 241, 0.2)' : 'transparent'};
                                     cursor: pointer; border-left: 3px solid ${session.is_current ? '#6366f1' : 'transparent'};">
                             <div class="d-flex justify-content-between align-items-center">
-                                <div onclick="switchSession('${session.id}')" style="flex: 1; cursor: pointer;">
+                                <div onclick="llmSwitchSession('${session.id}')" style="flex: 1; cursor: pointer;">
                                     <i class="fas fa-comment me-2"></i>
-                                    <strong id="name-${session.id}">${escapeHtml(session.name)}</strong>
+                                    <strong id="llmName-${session.id}">${llmEscapeHtml(session.name)}</strong>
                                     <br>
                                     <small class="text-muted">${session.message_count} сообщений</small>
                                 </div>
                                 <div>
-                                    <button class="btn btn-sm btn-outline-secondary me-1" onclick="renameSession('${session.id}')" title="Переименовать">
+                                    <button class="btn btn-sm btn-outline-secondary me-1" onclick="llmRenameSession('${session.id}')" title="Переименовать">
                                         <i class="fas fa-pencil-alt"></i>
                                     </button>
-                                    <button class="btn btn-sm btn-outline-danger" onclick="deleteSession('${session.id}')" title="Удалить">
+                                    <button class="btn btn-sm btn-outline-danger" onclick="llmDeleteSession('${session.id}')" title="Удалить">
                                         <i class="fas fa-times"></i>
                                     </button>
                                 </div>
@@ -611,25 +611,25 @@ class LLMModule(BaseModule):
                         </div>
                     `).join('');
                     
-                    const currentSession = sessions.find(s => s.id === currentSessionId);
+                    const currentSession = llmSessions.find(s => s.id === llmCurrentSessionId);
                     if (currentSession) {
-                        document.getElementById('currentSessionName').innerHTML = currentSession.name;
-                        document.getElementById('contextSizeBadge').innerHTML = currentSession.message_count + ' сообщений';
-                        await loadSessionMessages(currentSessionId);
+                        document.getElementById('llmCurrentSessionName').innerHTML = currentSession.name;
+                        document.getElementById('llmContextSizeBadge').innerHTML = currentSession.message_count + ' сообщений';
+                        await llmLoadSessionMessages(llmCurrentSessionId);
                     }
                     
-                    await loadCurrentModel();
+                    await llmLoadCurrentModel();
                 } catch(e) {
                     console.error('Ошибка загрузки сессий:', e);
                 }
             }
             
-            async function loadSessionMessages(sessionId) {
+            async function llmLoadSessionMessages(sessionId) {
                 try {
                     const response = await fetch(`/api/llm/sessions/messages/${sessionId}`);
                     const data = await response.json();
                     
-                    const chatMessages = document.getElementById('chatMessages');
+                    const chatMessages = document.getElementById('llmChatMessages');
                     if (data.messages.length === 0) {
                         chatMessages.innerHTML = '<div class="text-center text-muted p-3">Нет сообщений. Напишите что-нибудь!</div>';
                         return;
@@ -646,7 +646,7 @@ class LLMModule(BaseModule):
                                         ${msg.role === 'user' ? 'Вы' : 'AI'}
                                         <span style="font-size: 0.7rem;">${new Date(msg.timestamp).toLocaleTimeString()}</span>
                                     </small>
-                                    <div class="mt-1">${escapeHtml(msg.content)}</div>
+                                    <div class="mt-1">${llmEscapeHtml(msg.content)}</div>
                                 </div>
                             </div>
                         </div>
@@ -658,9 +658,9 @@ class LLMModule(BaseModule):
                 }
             }
             
-            function showApiError(message) {
-                const alertDiv = document.getElementById('apiErrorAlert');
-                const messageSpan = document.getElementById('apiErrorMessage');
+            function llmShowApiError(message) {
+                const alertDiv = document.getElementById('llmApiErrorAlert');
+                const messageSpan = document.getElementById('llmApiErrorMessage');
                 messageSpan.innerHTML = message;
                 alertDiv.style.display = 'block';
                 setTimeout(() => {
@@ -668,53 +668,53 @@ class LLMModule(BaseModule):
                 }, 5000);
             }
             
-            async function sendMessage() {
-                const messageInput = document.getElementById('messageInput');
+            async function llmSendMessage() {
+                const messageInput = document.getElementById('llmMessageInput');
                 const message = messageInput.value.trim();
                 if (!message) return;
                 
-                if (!currentSessionId) {
-                    await createNewSession();
+                if (!llmCurrentSessionId) {
+                    await llmCreateNewSession();
                 }
                 
-                addMessageToChat(message, 'user');
+                llmAddMessageToChat(message, 'user');
                 messageInput.value = '';
-                showTypingIndicator();
+                llmShowTypingIndicator();
                 
                 try {
                     const response = await fetch('/api/llm/chat', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({message: message, session_id: currentSessionId})
+                        body: JSON.stringify({message: message, session_id: llmCurrentSessionId})
                     });
                     
                     const data = await response.json();
-                    hideTypingIndicator();
+                    llmHideTypingIndicator();
                     
                     if (data.api_error) {
-                        showApiError('Ошибка API: ' + data.api_error + '. Использован fallback ответ.');
+                        llmShowApiError('Ошибка API: ' + data.api_error + '. Использован fallback ответ.');
                     }
                     
-                    addMessageToChat(data.response, 'ai');
+                    llmAddMessageToChat(data.response, 'ai');
                     
                     if (data.context_size) {
-                        document.getElementById('contextSizeBadge').innerHTML = data.context_size + ' сообщений';
+                        document.getElementById('llmContextSizeBadge').innerHTML = data.context_size + ' сообщений';
                     }
                     
-                    if (data.model_used !== currentModel) {
-                        await loadCurrentModel();
+                    if (data.model_used !== llmCurrentModel) {
+                        await llmLoadCurrentModel();
                     }
                     
-                    await loadSessions();
+                    await llmLoadSessions();
                 } catch(error) {
-                    hideTypingIndicator();
-                    addMessageToChat('Ошибка: ' + error.message, 'ai');
-                    showApiError('Ошибка соединения: ' + error.message);
+                    llmHideTypingIndicator();
+                    llmAddMessageToChat('Ошибка: ' + error.message, 'ai');
+                    llmShowApiError('Ошибка соединения: ' + error.message);
                 }
             }
             
-            function addMessageToChat(text, sender) {
-                const chatMessages = document.getElementById('chatMessages');
+            function llmAddMessageToChat(text, sender) {
+                const chatMessages = document.getElementById('llmChatMessages');
                 
                 if (chatMessages.innerHTML.includes('Нет сообщений')) {
                     chatMessages.innerHTML = '';
@@ -728,7 +728,7 @@ class LLMModule(BaseModule):
                         <div class="me-2"><i class="fas fa-${sender === 'user' ? 'user' : 'robot'}"></i></div>
                         <div style="flex: 1;">
                             <small class="text-secondary">${sender === 'user' ? 'Вы' : 'AI'}</small>
-                            <div class="mt-1">${escapeHtml(text)}</div>
+                            <div class="mt-1">${llmEscapeHtml(text)}</div>
                         </div>
                     </div>
                 `;
@@ -736,7 +736,7 @@ class LLMModule(BaseModule):
                 chatMessages.scrollTop = chatMessages.scrollHeight;
             }
             
-            async function createNewSession() {
+            async function llmCreateNewSession() {
                 const name = prompt('Введите название сессии:', 'Новый чат');
                 if (!name) return;
                 
@@ -748,26 +748,26 @@ class LLMModule(BaseModule):
                 
                 const data = await response.json();
                 if (data.status === 'ok') {
-                    await loadSessions();
-                    showNotification('Сессия создана', 'success');
+                    await llmLoadSessions();
+                    llmShowNotification('Сессия создана', 'success');
                 }
             }
             
-            async function switchSession(sessionId) {
+            async function llmSwitchSession(sessionId) {
                 const response = await fetch(`/api/llm/sessions/switch/${sessionId}`, {
                     method: 'POST'
                 });
                 
                 const data = await response.json();
                 if (data.status === 'ok') {
-                    currentSessionId = sessionId;
-                    await loadSessions();
-                    showNotification('Сессия переключена', 'success');
+                    llmCurrentSessionId = sessionId;
+                    await llmLoadSessions();
+                    llmShowNotification('Сессия переключена', 'success');
                 }
             }
             
-            async function renameSession(sessionId) {
-                const session = sessions.find(s => s.id === sessionId);
+            async function llmRenameSession(sessionId) {
+                const session = llmSessions.find(s => s.id === sessionId);
                 const newName = prompt('Введите новое название:', session.name);
                 if (!newName || newName === session.name) return;
                 
@@ -779,12 +779,12 @@ class LLMModule(BaseModule):
                 
                 const data = await response.json();
                 if (data.status === 'ok') {
-                    await loadSessions();
-                    showNotification('Сессия переименована', 'success');
+                    await llmLoadSessions();
+                    llmShowNotification('Сессия переименована', 'success');
                 }
             }
             
-            async function deleteSession(sessionId) {
+            async function llmDeleteSession(sessionId) {
                 if (!confirm('Удалить эту сессию?')) return;
                 
                 const response = await fetch(`/api/llm/sessions/delete/${sessionId}`, {
@@ -793,52 +793,52 @@ class LLMModule(BaseModule):
                 
                 const data = await response.json();
                 if (data.status === 'ok') {
-                    await loadSessions();
-                    showNotification('Сессия удалена', 'success');
+                    await llmLoadSessions();
+                    llmShowNotification('Сессия удалена', 'success');
                 }
             }
             
-            async function clearCurrentSession() {
-                if (!currentSessionId) return;
+            async function llmClearCurrentSession() {
+                if (!llmCurrentSessionId) return;
                 if (!confirm('Очистить всю историю сообщений в этой сессии?')) return;
                 
-                const response = await fetch(`/api/llm/sessions/clear/${currentSessionId}`, {
+                const response = await fetch(`/api/llm/sessions/clear/${llmCurrentSessionId}`, {
                     method: 'POST'
                 });
                 
                 const data = await response.json();
                 if (data.status === 'ok') {
-                    await loadSessionMessages(currentSessionId);
-                    document.getElementById('contextSizeBadge').innerHTML = '0 сообщений';
-                    showNotification('История очищена', 'success');
+                    await llmLoadSessionMessages(llmCurrentSessionId);
+                    document.getElementById('llmContextSizeBadge').innerHTML = '0 сообщений';
+                    llmShowNotification('История очищена', 'success');
                 }
             }
             
-            function showTypingIndicator() {
-                const existing = document.getElementById('typingIndicator');
+            function llmShowTypingIndicator() {
+                const existing = document.getElementById('llmTypingIndicator');
                 if (existing) existing.remove();
                 
-                const chatMessages = document.getElementById('chatMessages');
+                const chatMessages = document.getElementById('llmChatMessages');
                 const indicator = document.createElement('div');
-                indicator.id = 'typingIndicator';
+                indicator.id = 'llmTypingIndicator';
                 indicator.className = 'chat-message ai';
                 indicator.innerHTML = `<div class="d-flex"><div class="spinner-border spinner-border-sm me-2"></div><span>Печатает...</span></div>`;
                 chatMessages.appendChild(indicator);
                 chatMessages.scrollTop = chatMessages.scrollHeight;
             }
             
-            function hideTypingIndicator() {
-                const indicator = document.getElementById('typingIndicator');
+            function llmHideTypingIndicator() {
+                const indicator = document.getElementById('llmTypingIndicator');
                 if (indicator) indicator.remove();
             }
             
-            function escapeHtml(text) {
+            function llmEscapeHtml(text) {
                 const div = document.createElement('div');
                 div.textContent = text;
                 return div.innerHTML;
             }
             
-            function showNotification(message, type) {
+            function llmShowNotification(message, type) {
                 const notification = document.createElement('div');
                 notification.className = `alert alert-${type} position-fixed top-0 end-0 m-3`;
                 notification.style.zIndex = '9999';
@@ -852,25 +852,32 @@ class LLMModule(BaseModule):
                 setTimeout(() => notification.remove(), 2000);
             }
             
-            const messageInput = document.getElementById('messageInput');
-            messageInput.addEventListener('keydown', (e) => {
+            const llmMessageInput = document.getElementById('llmMessageInput');
+            llmMessageInput.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    sendMessage();
+                    llmSendMessage();
                 }
             });
             
-            loadSessions();
+            window.llmCreateNewSession = llmCreateNewSession;
+            window.llmSwitchSession = llmSwitchSession;
+            window.llmRenameSession = llmRenameSession;
+            window.llmDeleteSession = llmDeleteSession;
+            window.llmClearCurrentSession = llmClearCurrentSession;
+            window.llmSendMessage = llmSendMessage;
+            
+            llmLoadSessions();
         </script>
         """)
     
     def register_settings_ui(self):
         return """
-        <div class="row">
+        <div class="row" id="llm-settings-container">
             <div class="col-md-12">
-                <div class="alert alert-info mb-3" id="statusAlert">
+                <div class="alert alert-info mb-3" id="llmStatusAlert">
                     <i class="fas fa-info-circle me-2"></i>
-                    <span id="statusMessage">Загрузка настроек...</span>
+                    <span id="llmStatusMessage">Загрузка настроек...</span>
                 </div>
             </div>
             
@@ -880,7 +887,7 @@ class LLMModule(BaseModule):
                     <div class="card-body">
                         <div class="mb-3">
                             <label class="form-label">OpenRouter API Key</label>
-                            <input type="password" class="form-control" id="apiKeyInput" placeholder="sk-or-v1-...">
+                            <input type="password" class="form-control" id="llmApiKeyInput" placeholder="sk-or-v1-...">
                             <small class="text-muted d-block mt-2">
                                 <a href="https://openrouter.ai/keys" target="_blank">Получить ключ на OpenRouter</a>
                             </small>
@@ -895,14 +902,14 @@ class LLMModule(BaseModule):
                     <div class="card-body">
                         <div class="mb-3">
                             <label class="form-label">Модель AI</label>
-                            <select class="form-select" id="modelSelect">
+                            <select class="form-select" id="llmModelSelect">
                                 <option value="">Загрузка...</option>
                             </select>
                         </div>
                         
                         <div class="mb-3">
-                            <label class="form-label">Температура: <span id="temperatureValue">0.8</span></label>
-                            <input type="range" class="form-range" id="temperatureSlider" min="0" max="2" step="0.1" value="0.8">
+                            <label class="form-label">Температура: <span id="llmTemperatureValue">0.8</span></label>
+                            <input type="range" class="form-range" id="llmTemperatureSlider" min="0" max="2" step="0.1" value="0.8">
                             <div class="d-flex justify-content-between">
                                 <small>Точный</small>
                                 <small>Креативный</small>
@@ -911,13 +918,13 @@ class LLMModule(BaseModule):
                         
                         <div class="mb-3">
                             <label class="form-label">Max Tokens (макс. длина ответа)</label>
-                            <input type="number" class="form-control" id="maxTokensInput" value="500" min="50" max="2000">
+                            <input type="number" class="form-control" id="llmMaxTokensInput" value="500" min="50" max="2000">
                             <small class="text-muted">Больше токенов = более длинные ответы</small>
                         </div>
                         
                         <div class="mb-3">
                             <label class="form-label">System Prompt</label>
-                            <textarea class="form-control" id="systemPromptInput" rows="3"></textarea>
+                            <textarea class="form-control" id="llmSystemPromptInput" rows="3"></textarea>
                         </div>
                     </div>
                 </div>
@@ -933,7 +940,7 @@ class LLMModule(BaseModule):
                         </div>
                         
                         <div class="mb-3">
-                            <textarea class="form-control" id="fallbackInput" rows="6" style="font-family: monospace;"></textarea>
+                            <textarea class="form-control" id="llmFallbackInput" rows="6" style="font-family: monospace;"></textarea>
                             <small class="text-muted">Каждый ответ с новой строки</small>
                         </div>
                     </div>
@@ -943,10 +950,10 @@ class LLMModule(BaseModule):
             <div class="col-md-12">
                 <div class="card">
                     <div class="card-body text-center">
-                        <button class="btn btn-primary btn-lg" onclick="saveAllSettings()">
+                        <button class="btn btn-primary btn-lg" onclick="llmSaveAllSettings()">
                             <i class="fas fa-save me-2"></i>Сохранить все настройки
                         </button>
-                        <button class="btn btn-outline-danger ms-3" onclick="resetAllSettings()">
+                        <button class="btn btn-outline-danger ms-3" onclick="llmResetAllSettings()">
                             <i class="fas fa-undo me-2"></i>Сбросить все настройки
                         </button>
                     </div>
@@ -955,15 +962,15 @@ class LLMModule(BaseModule):
         </div>
         
         <script>
-            let currentSettings = {};
+            let llmCurrentSettings = {};
             
-            async function loadAllSettings() {
+            async function llmLoadAllSettings() {
                 try {
                     const response = await fetch('/api/llm/get_settings');
                     const data = await response.json();
-                    currentSettings = data;
+                    llmCurrentSettings = data;
                     
-                    const modelSelect = document.getElementById('modelSelect');
+                    const modelSelect = document.getElementById('llmModelSelect');
                     modelSelect.innerHTML = '';
                     for (const [id, name] of Object.entries(data.models)) {
                         const option = document.createElement('option');
@@ -975,13 +982,13 @@ class LLMModule(BaseModule):
                         modelSelect.appendChild(option);
                     }
                     
-                    document.getElementById('temperatureSlider').value = data.temperature;
-                    document.getElementById('temperatureValue').innerHTML = data.temperature;
-                    document.getElementById('maxTokensInput').value = data.max_tokens;
-                    document.getElementById('systemPromptInput').value = data.system_prompt;
-                    document.getElementById('fallbackInput').value = data.fallback_responses.join('\\n');
+                    document.getElementById('llmTemperatureSlider').value = data.temperature;
+                    document.getElementById('llmTemperatureValue').innerHTML = data.temperature;
+                    document.getElementById('llmMaxTokensInput').value = data.max_tokens;
+                    document.getElementById('llmSystemPromptInput').value = data.system_prompt;
+                    document.getElementById('llmFallbackInput').value = data.fallback_responses.join('\\n');
                     
-                    const statusMsg = document.getElementById('statusMessage');
+                    const statusMsg = document.getElementById('llmStatusMessage');
                     if (data.has_api_key) {
                         statusMsg.innerHTML = '✅ API ключ настроен. Текущая модель: ' + (data.models[data.model] || data.model);
                         statusMsg.parentElement.className = 'alert alert-success mb-3';
@@ -991,21 +998,21 @@ class LLMModule(BaseModule):
                     }
                 } catch(e) {
                     console.error('Ошибка загрузки:', e);
-                    document.getElementById('statusMessage').innerHTML = '❌ Ошибка загрузки настроек';
+                    document.getElementById('llmStatusMessage').innerHTML = '❌ Ошибка загрузки настроек';
                 }
             }
             
-            async function saveAllSettings() {
-                const apiKey = document.getElementById('apiKeyInput').value;
-                const model = document.getElementById('modelSelect').value;
-                const temperature = parseFloat(document.getElementById('temperatureSlider').value);
-                const maxTokens = parseInt(document.getElementById('maxTokensInput').value);
-                const systemPrompt = document.getElementById('systemPromptInput').value;
-                const fallbackText = document.getElementById('fallbackInput').value;
+            async function llmSaveAllSettings() {
+                const apiKey = document.getElementById('llmApiKeyInput').value;
+                const model = document.getElementById('llmModelSelect').value;
+                const temperature = parseFloat(document.getElementById('llmTemperatureSlider').value);
+                const maxTokens = parseInt(document.getElementById('llmMaxTokensInput').value);
+                const systemPrompt = document.getElementById('llmSystemPromptInput').value;
+                const fallbackText = document.getElementById('llmFallbackInput').value;
                 const fallbackResponses = fallbackText.split('\\n').filter(l => l.trim().length > 0);
                 
                 if (fallbackResponses.length === 0) {
-                    showNotification('Добавьте хотя бы один fallback ответ', 'error');
+                    llmShowNotification('Добавьте хотя бы один fallback ответ', 'error');
                     return;
                 }
                 
@@ -1026,20 +1033,20 @@ class LLMModule(BaseModule):
                 
                 const data = await response.json();
                 if (data.status === 'ok') {
-                    showNotification('✅ Все настройки сохранены! Модель: ' + (currentSettings.models[model] || model), 'success');
-                    document.getElementById('apiKeyInput').value = '';
-                    loadAllSettings();
+                    llmShowNotification('✅ Все настройки сохранены! Модель: ' + (llmCurrentSettings.models[model] || model), 'success');
+                    document.getElementById('llmApiKeyInput').value = '';
+                    llmLoadAllSettings();
                     
-                    const modelBadge = document.getElementById('currentModelBadge');
+                    const modelBadge = document.getElementById('llmCurrentModelBadge');
                     if (modelBadge && window.location.pathname === '/') {
-                        modelBadge.innerHTML = '<i class="fas fa-brain me-1"></i>' + (currentSettings.models[model] || model);
+                        modelBadge.innerHTML = '<i class="fas fa-brain me-1"></i>' + (llmCurrentSettings.models[model] || model);
                     }
                 } else {
-                    showNotification('❌ Ошибка сохранения', 'error');
+                    llmShowNotification('❌ Ошибка сохранения', 'error');
                 }
             }
             
-            async function resetAllSettings() {
+            async function llmResetAllSettings() {
                 if (!confirm('Сбросить ВСЕ настройки (модель, температуру, max tokens, system prompt и fallback ответы) к значениям по умолчанию? API ключ не будет удалён.')) return;
                 
                 const response = await fetch('/api/llm/reset_settings', {
@@ -1048,10 +1055,10 @@ class LLMModule(BaseModule):
                 
                 const data = await response.json();
                 if (data.status === 'ok') {
-                    showNotification('✅ Все настройки сброшены к значениям по умолчанию', 'success');
-                    await loadAllSettings();
+                    llmShowNotification('✅ Все настройки сброшены к значениям по умолчанию', 'success');
+                    await llmLoadAllSettings();
                     
-                    const modelSelect = document.getElementById('modelSelect');
+                    const modelSelect = document.getElementById('llmModelSelect');
                     if (modelSelect) {
                         for (let i = 0; i < modelSelect.options.length; i++) {
                             if (modelSelect.options[i].value === data.default_model) {
@@ -1061,20 +1068,20 @@ class LLMModule(BaseModule):
                         }
                     }
                     
-                    document.getElementById('temperatureSlider').value = data.default_temperature;
-                    document.getElementById('temperatureValue').innerHTML = data.default_temperature;
-                    document.getElementById('maxTokensInput').value = data.default_max_tokens;
-                    document.getElementById('systemPromptInput').value = data.default_system_prompt;
+                    document.getElementById('llmTemperatureSlider').value = data.default_temperature;
+                    document.getElementById('llmTemperatureValue').innerHTML = data.default_temperature;
+                    document.getElementById('llmMaxTokensInput').value = data.default_max_tokens;
+                    document.getElementById('llmSystemPromptInput').value = data.default_system_prompt;
                 } else {
-                    showNotification('❌ Ошибка сброса настроек', 'error');
+                    llmShowNotification('❌ Ошибка сброса настроек', 'error');
                 }
             }
             
-            document.getElementById('temperatureSlider').addEventListener('input', function() {
-                document.getElementById('temperatureValue').innerHTML = this.value;
+            document.getElementById('llmTemperatureSlider').addEventListener('input', function() {
+                document.getElementById('llmTemperatureValue').innerHTML = this.value;
             });
             
-            function showNotification(message, type) {
+            function llmShowNotification(message, type) {
                 const notification = document.createElement('div');
                 notification.className = `alert alert-${type} position-fixed top-0 end-0 m-3`;
                 notification.style.zIndex = '9999';
@@ -1088,7 +1095,10 @@ class LLMModule(BaseModule):
                 setTimeout(() => notification.remove(), 3000);
             }
             
-            loadAllSettings();
+            window.llmSaveAllSettings = llmSaveAllSettings;
+            window.llmResetAllSettings = llmResetAllSettings;
+            
+            llmLoadAllSettings();
         </script>
         """
     
