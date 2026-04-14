@@ -22,7 +22,7 @@
 ### 1. Клонирование репозитория
 
 ```bash
-git clone https://github.com/yourusername/NeuroVT.git
+git clone https://github.com/FreshLend/NeuroVT.git
 cd NeuroVT
 ```
 
