@@ -1,0 +1,301 @@
+<div class="row" id="llm-module-container">
+    <div class="col-md-4">
+        <div class="card mb-3">
+            <div class="card-header">
+                <i class="fas fa-comments me-2"></i>
+                Сессии чатов
+                <button class="btn btn-sm btn-primary float-end" onclick="llmCreateNewSession()">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+            <div class="card-body" style="max-height: 500px; overflow-y: auto; padding: 0;">
+                <div id="llmSessionsList" class="list-group list-group-flush">
+                    <div class="text-center p-3">Загрузка...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-comment me-2"></i><span id="llmCurrentSessionName">Загрузка...</span></span>
+                <div>
+                    <span class="badge bg-info me-2" id="llmCurrentModelBadge">Загрузка...</span>
+                    <span class="badge bg-secondary me-2" id="llmContextSizeBadge">0 сообщений</span>
+                    <span class="badge bg-dark" id="llmTokensBadge">0/4096 токенов</span>
+                    <button class="btn btn-sm btn-outline-danger" onclick="llmClearCurrentSession()" title="Очистить историю"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="llmApiErrorAlert" class="alert alert-danger mb-3" style="display: none;">
+                    <i class="fas fa-exclamation-triangle me-2"></i><span id="llmApiErrorMessage"></span>
+                </div>
+                <div class="chat-log" id="llmChatMessages" style="height: 400px; overflow-y: auto;">
+                    <div class="text-center text-muted p-3">Выберите сессию или создайте новую</div>
+                </div>
+                <div class="mt-3">
+                    <div class="input-group">
+                        <textarea class="form-control" id="llmMessageInput" rows="2" placeholder="Напишите сообщение... (Enter - отправить)" style="resize: none;"></textarea>
+                        <button class="btn btn-primary" onclick="llmSendMessage()"><i class="fas fa-paper-plane"></i> Отправить</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    let llmCurrentSessionId = null;
+    let llmSessions = [];
+    let llmCurrentModel = null;
+    let llmContextLimit = 4096;
+    let llmTypingTimeout = null;
+
+    async function llmLoadCurrentModel() {
+        try {
+            const response = await fetch('/api/llm/get_settings');
+            const data = await response.json();
+            llmCurrentModel = data.model;
+            llmContextLimit = data.context_token_limit;
+            const modelName = data.models[data.model] || data.model;
+            document.getElementById('llmCurrentModelBadge').innerHTML = '<i class="fas fa-brain me-1"></i>' + modelName;
+        } catch(e) { console.error(e); }
+    }
+
+    async function llmLoadSessions() {
+        try {
+            const response = await fetch('/api/llm/sessions');
+            const data = await response.json();
+            llmSessions = data.sessions;
+            llmCurrentSessionId = data.current_id;
+            const sessionsList = document.getElementById('llmSessionsList');
+            if (llmSessions.length === 0) { sessionsList.innerHTML = '<div class="text-center text-muted p-3">Нет сессий</div>'; return; }
+            sessionsList.innerHTML = llmSessions.map(session => `
+                <div class="list-group-item list-group-item-action ${session.is_current ? 'active' : ''}" data-session-id="${session.id}" style="background: ${session.is_current ? 'rgba(99, 102, 241, 0.2)' : 'transparent'}; cursor: pointer; border-left: 3px solid ${session.is_current ? '#6366f1' : 'transparent'};">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div onclick="llmSwitchSession('${session.id}')" style="flex: 1; cursor: pointer;">
+                            <i class="fas fa-comment me-2"></i><strong id="llmName-${session.id}">${llmEscapeHtml(session.name)}</strong><br>
+                            <small class="text-muted">${session.message_count} сообщений</small>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-secondary me-1" onclick="llmRenameSession('${session.id}')" title="Переименовать"><i class="fas fa-pencil-alt"></i></button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="llmDeleteSession('${session.id}')" title="Удалить"><i class="fas fa-times"></i></button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            const currentSession = llmSessions.find(s => s.id === llmCurrentSessionId);
+            if (currentSession) {
+                document.getElementById('llmCurrentSessionName').innerHTML = currentSession.name;
+                document.getElementById('llmContextSizeBadge').innerHTML = currentSession.message_count + ' сообщений';
+                await llmLoadSessionMessages(llmCurrentSessionId);
+            }
+            await llmLoadCurrentModel();
+        } catch(e) { console.error(e); }
+    }
+
+    function llmUpdateSessionInList(sessionId, newMessageCount, newName = null) {
+        const sessionItem = document.querySelector(`.list-group-item[data-session-id="${sessionId}"]`);
+        if (sessionItem) {
+            const nameSpan = document.getElementById(`llmName-${sessionId}`);
+            if (newName && nameSpan) nameSpan.innerHTML = llmEscapeHtml(newName);
+            const small = sessionItem.querySelector('small');
+            if (small) small.innerHTML = newMessageCount + ' сообщений';
+        }
+    }
+
+    async function llmLoadSessionMessages(sessionId) {
+        try {
+            const response = await fetch(`/api/llm/sessions/messages/${sessionId}`);
+            const data = await response.json();
+            const chatMessages = document.getElementById('llmChatMessages');
+            if (data.messages.length === 0) { 
+                chatMessages.innerHTML = '<div class="text-center text-muted p-3">Нет сообщений. Напишите что-нибудь!</div>';
+                const limit = data.context_limit || llmContextLimit;
+                document.getElementById('llmTokensBadge').innerHTML = '0/' + limit + ' токенов';
+                return; 
+            }
+            chatMessages.innerHTML = data.messages.map(msg => `
+                <div class="chat-message ${msg.role === 'user' ? 'user' : 'ai'}">
+                    <div class="d-flex align-items-start">
+                        <div class="me-2"><i class="fas fa-${msg.role === 'user' ? 'user' : 'robot'}"></i></div>
+                        <div style="flex: 1;">
+                            <small class="text-secondary">${msg.role === 'user' ? 'Вы' : 'AI'} <span style="font-size: 0.7rem;">${new Date(msg.timestamp).toLocaleTimeString()}</span></small>
+                            <div class="mt-1">${llmEscapeHtml(msg.content)}</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            const limit = data.context_limit || llmContextLimit;
+            const tokens = (data.context_tokens !== undefined) ? data.context_tokens : 0;
+            document.getElementById('llmTokensBadge').innerHTML = tokens + '/' + limit + ' токенов';
+        } catch(e) { console.error(e); }
+    }
+
+    function llmShowApiError(message) {
+        const alertDiv = document.getElementById('llmApiErrorAlert');
+        const messageSpan = document.getElementById('llmApiErrorMessage');
+        messageSpan.innerHTML = message;
+        alertDiv.style.display = 'block';
+        setTimeout(() => alertDiv.style.display = 'none', 5000);
+    }
+
+    async function llmSendMessage() {
+        const messageInput = document.getElementById('llmMessageInput');
+        const message = messageInput.value.trim();
+        if (!message) return;
+        if (!llmCurrentSessionId) await llmCreateNewSession();
+        llmAddMessageToChat(message, 'user');
+        messageInput.value = '';
+        llmShowTypingIndicator();
+        try {
+            const response = await fetch('/api/llm/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({message: message, session_id: llmCurrentSessionId})
+            });
+            const data = await response.json();
+            llmHideTypingIndicator();
+            if (data.api_error) llmShowApiError('Ошибка API: ' + data.api_error + '. Использован fallback ответ.');
+            llmAddMessageToChat(data.response, 'ai');
+            const currentSession = llmSessions.find(s => s.id === llmCurrentSessionId);
+            if (currentSession) {
+                currentSession.message_count = data.context_size;
+                document.getElementById('llmContextSizeBadge').innerHTML = currentSession.message_count + ' сообщений';
+                llmUpdateSessionInList(llmCurrentSessionId, currentSession.message_count);
+            }
+            if (data.context_tokens !== undefined) {
+                document.getElementById('llmTokensBadge').innerHTML = data.context_tokens + '/' + (data.context_limit || llmContextLimit) + ' токенов';
+            }
+            if (data.model_used !== llmCurrentModel) await llmLoadCurrentModel();
+        } catch(error) {
+            llmHideTypingIndicator();
+            llmAddMessageToChat('Ошибка: ' + error.message, 'ai');
+            llmShowApiError('Ошибка соединения: ' + error.message);
+        }
+    }
+
+    function llmAddMessageToChat(text, sender) {
+        const chatMessages = document.getElementById('llmChatMessages');
+        if (chatMessages.innerHTML.includes('Нет сообщений')) chatMessages.innerHTML = '';
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `chat-message ${sender}`;
+        messageDiv.innerHTML = `<div class="d-flex align-items-start"><div class="me-2"><i class="fas fa-${sender === 'user' ? 'user' : 'robot'}"></i></div><div style="flex: 1;"><small class="text-secondary">${sender === 'user' ? 'Вы' : 'AI'}</small><div class="mt-1">${llmEscapeHtml(text)}</div></div></div>`;
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    async function llmCreateNewSession() {
+        const name = prompt('Введите название сессии:', 'Новый чат');
+        if (!name) return;
+        const response = await fetch('/api/llm/sessions/create', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name})
+        });
+        const data = await response.json();
+        if (data.status === 'ok') { await llmLoadSessions(); llmShowNotification('Сессия создана', 'success'); }
+    }
+
+    async function llmSwitchSession(sessionId) {
+        const response = await fetch(`/api/llm/sessions/switch/${sessionId}`, {method: 'POST'});
+        const data = await response.json();
+        if (data.status === 'ok') {
+            llmCurrentSessionId = sessionId;
+            await llmLoadSessions();
+            llmShowNotification('Сессия переключена', 'success');
+        }
+    }
+
+    async function llmRenameSession(sessionId) {
+        const session = llmSessions.find(s => s.id === sessionId);
+        const newName = prompt('Введите новое название:', session.name);
+        if (!newName || newName === session.name) return;
+        const response = await fetch(`/api/llm/sessions/rename/${sessionId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: newName})
+        });
+        const data = await response.json();
+        if (data.status === 'ok') {
+            session.name = newName;
+            document.getElementById('llmCurrentSessionName').innerHTML = newName;
+            llmUpdateSessionInList(sessionId, session.message_count, newName);
+            llmShowNotification('Сессия переименована', 'success');
+        }
+    }
+
+    async function llmDeleteSession(sessionId) {
+        if (!confirm('Удалить эту сессию?')) return;
+        const response = await fetch(`/api/llm/sessions/delete/${sessionId}`, {method: 'DELETE'});
+        const data = await response.json();
+        if (data.status === 'ok') { await llmLoadSessions(); llmShowNotification('Сессия удалена', 'success'); }
+    }
+
+    async function llmClearCurrentSession() {
+        if (!llmCurrentSessionId) return;
+        if (!confirm('Очистить всю историю сообщений в этой сессии?')) return;
+        const response = await fetch(`/api/llm/sessions/clear/${llmCurrentSessionId}`, {method: 'POST'});
+        const data = await response.json();
+        if (data.status === 'ok') {
+            await llmLoadSessionMessages(llmCurrentSessionId);
+            document.getElementById('llmContextSizeBadge').innerHTML = '0 сообщений';
+            const currentSession = llmSessions.find(s => s.id === llmCurrentSessionId);
+            if (currentSession) {
+                currentSession.message_count = 0;
+                llmUpdateSessionInList(llmCurrentSessionId, 0);
+            }
+            llmShowNotification('История очищена', 'success');
+        }
+    }
+
+    function llmShowTypingIndicator() {
+        const existing = document.getElementById('llmTypingIndicator');
+        if (existing) existing.remove();
+        const chatMessages = document.getElementById('llmChatMessages');
+        const indicator = document.createElement('div');
+        indicator.id = 'llmTypingIndicator';
+        indicator.className = 'chat-message ai';
+        indicator.innerHTML = `<div class="d-flex"><div class="spinner-border spinner-border-sm me-2"></div><span>Печатает...</span></div>`;
+        chatMessages.appendChild(indicator);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        if (llmTypingTimeout) clearTimeout(llmTypingTimeout);
+        llmTypingTimeout = setTimeout(() => {
+            llmHideTypingIndicator();
+            llmShowApiError('Ответ слишком долгий. Проверьте интернет или API ключ.');
+        }, 30000);
+    }
+
+    function llmHideTypingIndicator() {
+        const indicator = document.getElementById('llmTypingIndicator');
+        if (indicator) indicator.remove();
+        if (llmTypingTimeout) clearTimeout(llmTypingTimeout);
+    }
+
+    function llmEscapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function llmShowNotification(message, type) {
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type} position-fixed top-0 end-0 m-3`;
+        notification.style.zIndex = '9999';
+        notification.style.background = type === 'success' ? '#10b981' : '#ef4444';
+        notification.style.color = '#ffffff';
+        notification.innerHTML = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 2000);
+    }
+
+    const llmMessageInput = document.getElementById('llmMessageInput');
+    llmMessageInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); llmSendMessage(); } });
+    window.llmCreateNewSession = llmCreateNewSession;
+    window.llmSwitchSession = llmSwitchSession;
+    window.llmRenameSession = llmRenameSession;
+    window.llmDeleteSession = llmDeleteSession;
+    window.llmClearCurrentSession = llmClearCurrentSession;
+    window.llmSendMessage = llmSendMessage;
+    llmLoadSessions();
+</script>

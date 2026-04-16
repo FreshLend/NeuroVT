@@ -1,16 +1,16 @@
-from flask import Flask, render_template, Response, request, jsonify
 import json
 import os
-import queue
+from flask import Flask, render_template, request, jsonify
+from flask_socketio import SocketIO
 from core.event_bus import event_bus
 from core.module_loader import load_modules
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'vtuber_secret_key'
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 main_tabs = []
 settings_tabs = []
-audio_clients = []
 
 def load_global_settings():
     settings = {}
@@ -63,53 +63,17 @@ def save_all_settings():
 def get_all_settings():
     return jsonify(app.config['SETTINGS'])
 
-@app.route('/api/tts/stream')
-def tts_stream():
-    client_queue = queue.Queue()
-    audio_clients.append(client_queue)
-    
-    def generate():
-        try:
-            yield f"data: {json.dumps({'type': 'connected'})}\n\n"
-            while True:
-                data = client_queue.get(timeout=30)
-                yield f"data: {json.dumps(data)}\n\n"
-        except queue.Empty:
-            yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
-        except GeneratorExit:
-            pass
-        finally:
-            if client_queue in audio_clients:
-                audio_clients.remove(client_queue)
-    
-    return Response(generate(), mimetype="text/event-stream", 
-                   headers={"Cache-Control": "no-cache", "Access-Control-Allow-Origin": "*"})
-
-def on_tts_audio(data):
-    for client in audio_clients[:]:
-        try:
-            client.put({
-                "type": "audio",
-                "audio": data.get("audio"),
-                "text": data.get("text"),
-                "source": data.get("source", "unknown")
-            })
-        except:
-            if client in audio_clients:
-                audio_clients.remove(client)
-
-event_bus.subscribe("tts_audio_ready", on_tts_audio)
-
 def main():
     global main_tabs, settings_tabs
     
-    modules = load_modules(app, event_bus)
+    modules = load_modules(app, event_bus, socketio)
     
     if modules:
         print(f"\nЗагружено модулей: {len(modules)}")
         for mod in modules:
             print(f"  {mod.display_name}")
             mod.register_routes()
+            mod.register_socketio_handlers(socketio)
             
             settings_ui = mod.register_settings_ui()
             if settings_ui:
@@ -127,7 +91,7 @@ def main():
     print("Сервер запущен: http://localhost:5000")
     print("=" * 60 + "\n")
     
-    app.run(debug=True, host='0.0.0.0', port=5000, threaded=True, use_reloader=False)
+    socketio.run(app, debug=True, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
 
 if __name__ == '__main__':
     main()

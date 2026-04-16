@@ -1,0 +1,75 @@
+<div class="row" id="tts-settings-container">
+    <div class="col-md-6">
+        <div class="mb-3">
+            <label class="form-label">Голос (автосохранение)</label>
+            <select class="form-select" id="ttsVoiceSelect" onchange="ttsChangeVoice()">
+                <option value="aidar">Айдар (мужской)</option>
+                <option value="baya">Бая (женский)</option>
+                <option value="kseniya">Ксения (женский)</option>
+                <option value="xenia">Ксения (альт)</option>
+                <option value="eugene">Евгений (мужской)</option>
+            </select>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="mb-3">
+            <label class="form-label">Качество (автосохранение)</label>
+            <select class="form-select" id="ttsQualitySelect" onchange="ttsChangeQuality()">
+                <option value="24000">Стандартное (24 кГц)</option>
+                <option value="48000">Высокое (48 кГц)</option>
+            </select>
+        </div>
+    </div>
+</div>
+<div class="alert alert-info" id="ttsCurrentSettings">Загрузка...</div>
+<script>
+    async function ttsLoadSettings() {
+        const response = await fetch('/api/tts/get_settings');
+        const data = await response.json();
+        document.getElementById('ttsCurrentSettings').innerHTML = `
+            <i class="fas fa-info-circle me-2"></i>
+            Текущие: голос ${data.voice_name}, качество ${data.quality}
+        `;
+        document.getElementById('ttsVoiceSelect').value = data.voice;
+        document.getElementById('ttsQualitySelect').value = data.sample_rate;
+    }
+    async function ttsChangeVoice() {
+        const voice = document.getElementById('ttsVoiceSelect').value;
+        const response = await fetch('/api/tts/voice', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({voice: voice})
+        });
+        const data = await response.json();
+        if (data.status === 'ok') {
+            ttsShowNotification('Голос изменён', 'success');
+            ttsLoadSettings();
+        }
+    }
+    async function ttsChangeQuality() {
+        const quality = parseInt(document.getElementById('ttsQualitySelect').value);
+        const response = await fetch('/api/tts/quality', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({sample_rate: quality})
+        });
+        const data = await response.json();
+        if (data.status === 'ok') {
+            ttsShowNotification('Качество изменено', 'success');
+            ttsLoadSettings();
+        }
+    }
+    function ttsShowNotification(message, type) {
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type} position-fixed top-0 end-0 m-3`;
+        notification.style.zIndex = '9999';
+        notification.style.background = type === 'success' ? '#10b981' : '#ef4444';
+        notification.style.color = '#ffffff';
+        notification.innerHTML = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 2000);
+    }
+    window.ttsChangeVoice = ttsChangeVoice;
+    window.ttsChangeQuality = ttsChangeQuality;
+    ttsLoadSettings();
+</script>

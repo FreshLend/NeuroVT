@@ -1,0 +1,162 @@
+<div class="row" id="llm-settings-container">
+    <div class="col-md-12">
+        <div class="alert alert-info mb-3" id="llmStatusAlert">
+            <i class="fas fa-info-circle me-2"></i>
+            <span id="llmStatusMessage">Загрузка настроек...</span>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-header">API Настройки</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">OpenRouter API Key</label>
+                    <input type="password" class="form-control" id="llmApiKeyInput" placeholder="sk-or-v1-...">
+                    <small class="text-muted d-block mt-2"><a href="https://openrouter.ai/keys" target="_blank">Получить ключ на OpenRouter</a></small>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-header">Модель и параметры</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Модель AI</label>
+                    <select class="form-select" id="llmModelSelect"><option value="">Загрузка...</option></select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Температура: <span id="llmTemperatureValue">0.8</span></label>
+                    <input type="range" class="form-range" id="llmTemperatureSlider" min="0" max="2" step="0.1" value="0.8">
+                    <div class="d-flex justify-content-between"><small>Точный</small><small>Креативный</small></div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Max Tokens (макс. длина ответа)</label>
+                    <input type="number" class="form-control" id="llmMaxTokensInput" value="500" min="50" max="2000">
+                    <small class="text-muted">Больше токенов = более длинные ответы</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Лимит контекста (токенов)</label>
+                    <input type="number" class="form-control" id="llmContextLimitInput" value="4096" min="512" max="16384" step="512">
+                    <small class="text-muted">Общее число токенов (история + ответ). Чем больше, тем лучше память, но выше задержка.</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">System Prompt</label>
+                    <textarea class="form-control" id="llmSystemPromptInput" rows="3"></textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-12">
+        <div class="card mb-3">
+            <div class="card-header">Fallback ответы (оффлайн режим)</div>
+            <div class="card-body">
+                <div class="alert alert-warning"><i class="fas fa-exclamation-triangle me-2"></i>Эти ответы используются, когда API недоступен.</div>
+                <div class="mb-3">
+                    <textarea class="form-control" id="llmFallbackInput" rows="6" style="font-family: monospace;"></textarea>
+                    <small class="text-muted">Каждый ответ с новой строки</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-body text-center">
+                <button class="btn btn-primary btn-lg" onclick="llmSaveAllSettings()"><i class="fas fa-save me-2"></i>Сохранить все настройки</button>
+                <button class="btn btn-outline-danger ms-3" onclick="llmResetAllSettings()"><i class="fas fa-undo me-2"></i>Сбросить все настройки</button>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    let llmCurrentSettings = {};
+    async function llmLoadAllSettings() {
+        try {
+            const response = await fetch('/api/llm/get_settings');
+            const data = await response.json();
+            llmCurrentSettings = data;
+            const modelSelect = document.getElementById('llmModelSelect');
+            modelSelect.innerHTML = '';
+            for (const [id, name] of Object.entries(data.models)) {
+                const option = document.createElement('option');
+                option.value = id;
+                option.textContent = name;
+                if (id === data.model) option.selected = true;
+                modelSelect.appendChild(option);
+            }
+            document.getElementById('llmTemperatureSlider').value = data.temperature;
+            document.getElementById('llmTemperatureValue').innerHTML = data.temperature;
+            document.getElementById('llmMaxTokensInput').value = data.max_tokens;
+            document.getElementById('llmContextLimitInput').value = data.context_token_limit;
+            document.getElementById('llmSystemPromptInput').value = data.system_prompt;
+            document.getElementById('llmFallbackInput').value = data.fallback_responses.join('\n');
+            const statusMsg = document.getElementById('llmStatusMessage');
+            if (data.has_api_key) {
+                statusMsg.innerHTML = '✅ API ключ настроен. Текущая модель: ' + (data.models[data.model] || data.model);
+                statusMsg.parentElement.className = 'alert alert-success mb-3';
+            } else {
+                statusMsg.innerHTML = '⚠️ API ключ не настроен. Будут использоваться fallback ответы.';
+                statusMsg.parentElement.className = 'alert alert-warning mb-3';
+            }
+        } catch(e) { console.error(e); document.getElementById('llmStatusMessage').innerHTML = '❌ Ошибка загрузки настроек'; }
+    }
+    async function llmSaveAllSettings() {
+        const apiKey = document.getElementById('llmApiKeyInput').value;
+        const model = document.getElementById('llmModelSelect').value;
+        const temperature = parseFloat(document.getElementById('llmTemperatureSlider').value);
+        const maxTokens = parseInt(document.getElementById('llmMaxTokensInput').value);
+        const contextLimit = parseInt(document.getElementById('llmContextLimitInput').value);
+        const systemPrompt = document.getElementById('llmSystemPromptInput').value;
+        const fallbackText = document.getElementById('llmFallbackInput').value;
+        const fallbackResponses = fallbackText.split('\n').filter(l => l.trim().length > 0);
+        if (fallbackResponses.length === 0) { llmShowNotification('Добавьте хотя бы один fallback ответ', 'error'); return; }
+        const saveData = { openrouter_api_key: apiKey, model: model, temperature: temperature, max_tokens: maxTokens, context_token_limit: contextLimit, system_prompt: systemPrompt, fallback_responses: fallbackResponses };
+        const response = await fetch('/api/llm/save_all_settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(saveData)
+        });
+        const data = await response.json();
+        if (data.status === 'ok') {
+            llmShowNotification('✅ Все настройки сохранены! Модель: ' + (llmCurrentSettings.models[model] || model), 'success');
+            document.getElementById('llmApiKeyInput').value = '';
+            llmLoadAllSettings();
+            const modelBadge = document.getElementById('llmCurrentModelBadge');
+            if (modelBadge && window.location.pathname === '/') modelBadge.innerHTML = '<i class="fas fa-brain me-1"></i>' + (llmCurrentSettings.models[model] || model);
+        } else { llmShowNotification('❌ Ошибка сохранения', 'error'); }
+    }
+    async function llmResetAllSettings() {
+        if (!confirm('Сбросить ВСЕ настройки (модель, температуру, max tokens, лимит контекста, system prompt и fallback ответы) к значениям по умолчанию? API ключ не будет удалён.')) return;
+        const response = await fetch('/api/llm/reset_settings', {method: 'POST'});
+        const data = await response.json();
+        if (data.status === 'ok') {
+            llmShowNotification('✅ Все настройки сброшены к значениям по умолчанию', 'success');
+            await llmLoadAllSettings();
+            const modelSelect = document.getElementById('llmModelSelect');
+            if (modelSelect) {
+                for (let i = 0; i < modelSelect.options.length; i++) {
+                    if (modelSelect.options[i].value === data.default_model) { modelSelect.selectedIndex = i; break; }
+                }
+            }
+            document.getElementById('llmTemperatureSlider').value = data.default_temperature;
+            document.getElementById('llmTemperatureValue').innerHTML = data.default_temperature;
+            document.getElementById('llmMaxTokensInput').value = data.default_max_tokens;
+            document.getElementById('llmContextLimitInput').value = data.default_context_limit;
+            document.getElementById('llmSystemPromptInput').value = data.default_system_prompt;
+        } else { llmShowNotification('❌ Ошибка сброса настроек', 'error'); }
+    }
+    document.getElementById('llmTemperatureSlider').addEventListener('input', function() { document.getElementById('llmTemperatureValue').innerHTML = this.value; });
+    function llmShowNotification(message, type) {
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type} position-fixed top-0 end-0 m-3`;
+        notification.style.zIndex = '9999';
+        notification.style.background = type === 'success' ? '#10b981' : (type === 'error' ? '#ef4444' : '#3b82f6');
+        notification.style.color = '#ffffff';
+        notification.innerHTML = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+    }
+    window.llmSaveAllSettings = llmSaveAllSettings;
+    window.llmResetAllSettings = llmResetAllSettings;
+    llmLoadAllSettings();
+</script>

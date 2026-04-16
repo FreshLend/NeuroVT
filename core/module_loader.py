@@ -1,8 +1,8 @@
 import os
-import importlib
+import importlib.util
 import sys
 
-def load_modules(app, event_bus, modules_dir="modules"):
+def load_modules(app, event_bus, socketio, modules_dir="modules"):
     modules = []
     
     if not os.path.exists(modules_dir):
@@ -37,7 +37,7 @@ def load_modules(app, event_bus, modules_dir="modules"):
                             attr = getattr(mod, attr_name)
                             if (isinstance(attr, type) and issubclass(attr, BaseModule) 
                                 and attr != BaseModule):
-                                instance = attr(app, event_bus)
+                                instance = attr(app, event_bus, socketio)
                                 modules.append(instance)
                                 print(f"[LOADER] Загружен: {instance.display_name}")
                 except Exception as e:

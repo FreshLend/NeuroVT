@@ -1,0 +1,130 @@
+<div class="row" id="tts-module-container">
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-header">Статус озвучки</div>
+            <div class="card-body">
+                <div class="mb-2">
+                    <strong>Состояние:</strong>
+                    <span id="ttsStatus" class="badge bg-warning ms-2">Загрузка...</span>
+                </div>
+                <div class="mb-2">
+                    <strong>Очередь:</strong>
+                    <span id="ttsQueueSize">0</span>
+                    <button class="btn btn-sm btn-danger ms-2" onclick="ttsClearQueue()">Очистить</button>
+                </div>
+                <div class="mb-2"><strong>Всего озвучено:</strong> <span id="ttsTotalProcessed">0</span></div>
+                <div class="mb-2"><strong>Голос:</strong> <span id="ttsCurrentVoice">-</span></div>
+                <div class="mb-2"><strong>Качество:</strong> <span id="ttsQuality">-</span></div>
+                <button class="btn btn-primary" onclick="ttsTest()">Тест озвучки</button>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">История</div>
+            <div class="card-body" id="ttsHistoryList" style="max-height: 400px; overflow-y: auto;">
+                <div class="text-muted text-center">Нет сообщений</div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    let ttsUpdateInterval = null;
+    let ttsSocket = null;
+    
+    function ttsConnectWebSocket() {
+        ttsSocket = io();
+        ttsSocket.on('connect', function() {
+            console.log('TTS WebSocket connected');
+            ttsSocket.emit('join_tts', {});
+        });
+        ttsSocket.on('tts_audio', function(data) {
+            const audioBlob = new Blob([Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))], {type: 'audio/wav'});
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            audio.play();
+            URL.revokeObjectURL(audioUrl);
+            ttsShowNotification('Озвучено: ' + data.text.substring(0, 50), 'info');
+        });
+    }
+    
+    async function ttsUpdateStatus() {
+        try {
+            const response = await fetch('/api/tts/status');
+            const data = await response.json();
+            const statusBadge = document.getElementById('ttsStatus');
+            if (!data.model_loaded) statusBadge.innerHTML = 'Загрузка модели...';
+            else if (data.is_playing) statusBadge.innerHTML = 'Озвучивание...';
+            else if (data.queue_size > 0) statusBadge.innerHTML = `В очереди: ${data.queue_size}`;
+            else statusBadge.innerHTML = 'Готов';
+            document.getElementById('ttsQueueSize').innerHTML = data.queue_size;
+            document.getElementById('ttsTotalProcessed').innerHTML = data.total_processed;
+            document.getElementById('ttsCurrentVoice').innerHTML = data.current_voice;
+            document.getElementById('ttsQuality').innerHTML = (data.sample_rate / 1000) + ' кГц';
+            const historyList = document.getElementById('ttsHistoryList');
+            if (data.history.length === 0) {
+                historyList.innerHTML = '<div class="text-muted text-center">Нет сообщений</div>';
+            } else {
+                historyList.innerHTML = [...data.history].reverse().map(item => `
+                    <div class="mb-2 p-2 border rounded">
+                        <div class="d-flex justify-content-between">
+                            <small>${new Date(item.timestamp).toLocaleTimeString()}</small>
+                            <small class="text-${item.status === 'completed' ? 'success' : 'danger'}">
+                                ${item.status === 'completed' ? 'Озвучено' : 'Ошибка'}
+                            </small>
+                        </div>
+                        <div class="mt-1 small">${ttsEscapeHtml(item.text.substring(0, 100))}</div>
+                    </div>
+                `).join('');
+            }
+        } catch(e) {
+            console.error(e);
+        }
+    }
+    
+    async function ttsClearQueue() {
+        if (confirm('Очистить очередь?')) {
+            await fetch('/api/tts/queue/clear', {method: 'POST'});
+        }
+    }
+    
+    async function ttsTest() {
+        const text = prompt('Введите текст:', 'Привет! Это тестовая озвучка.');
+        if (text) {
+            await fetch('/api/tts/test', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({text: text})
+            });
+        }
+    }
+    
+    function ttsEscapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    
+    function ttsShowNotification(message, type) {
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type} position-fixed top-0 end-0 m-3`;
+        notification.style.zIndex = '9999';
+        notification.style.background = type === 'success' ? '#10b981' : (type === 'error' ? '#ef4444' : '#3b82f6');
+        notification.style.color = '#ffffff';
+        notification.innerHTML = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 2000);
+    }
+    
+    window.ttsClearQueue = ttsClearQueue;
+    window.ttsTest = ttsTest;
+    
+    ttsConnectWebSocket();
+    ttsUpdateInterval = setInterval(ttsUpdateStatus, 1000);
+    ttsUpdateStatus();
+    
+    window.addEventListener('beforeunload', () => {
+        if (ttsUpdateInterval) clearInterval(ttsUpdateInterval);
+        if (ttsSocket) ttsSocket.disconnect();
+    });
+</script>

@@ -1,0 +1,168 @@
+<div class="row" id="stt-module-container">
+    <div class="col-md-12">
+        <div class="card mb-3">
+            <div class="card-header">
+                <i class="fas fa-microphone me-2"></i>
+                Голосовое управление
+            </div>
+            <div class="card-body text-center">
+                <div id="sttStatus" class="mb-3">
+                    <span class="badge bg-secondary" id="sttStatusBadge">Загрузка...</span>
+                    <span class="badge bg-info ms-2" id="sttModelBadge">-</span>
+                </div>
+                <div id="sttVoiceText" class="alert alert-info mb-3" style="display: none;">
+                    <i class="fas fa-comment-dots me-2"></i>
+                    <span id="sttRecognizedText"></span>
+                </div>
+                <div class="mb-3">
+                    <div id="sttSpeakingIndicator" style="display: none;">
+                        <i class="fas fa-circle text-danger me-1" style="font-size: 12px;"></i>
+                        <span>🎤 Говорите...</span>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <button class="btn btn-success btn-lg" onclick="sttStart()" id="sttStartBtn">
+                        <i class="fas fa-play me-2"></i>Запустить
+                    </button>
+                    <button class="btn btn-warning btn-lg ms-2" onclick="sttRestart()" id="sttRestartBtn">
+                        <i class="fas fa-sync me-2"></i>Перезапустить
+                    </button>
+                    <button class="btn btn-danger btn-lg ms-2" onclick="sttStop()" id="sttStopBtn">
+                        <i class="fas fa-stop me-2"></i>Остановить
+                    </button>
+                </div>
+                <div class="mt-3">
+                    <div class="card">
+                        <div class="card-header small">
+                            <i class="fas fa-history me-1"></i>
+                            История распознанных фраз
+                        </div>
+                        <div class="card-body" id="sttHistoryList" style="max-height: 300px; overflow-y: auto;">
+                            <div class="text-muted text-center">Нет записей</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    let sttStatusInterval = null;
+    let sttLastHistoryHash = '';
+    let sttLastRecognizedText = '';
+    let sttNotificationTimeout = null;
+    
+    function sttUpdateHistoryDisplay(history) {
+        const historyList = document.getElementById('sttHistoryList');
+        const sttOnlyHistory = history ? history.filter(item => item.type === 'stt' || !item.type) : [];
+        const newHash = JSON.stringify(sttOnlyHistory);
+        if (newHash === sttLastHistoryHash) return;
+        sttLastHistoryHash = newHash;
+        if (!sttOnlyHistory || sttOnlyHistory.length === 0) {
+            historyList.innerHTML = '<div class="text-muted text-center">Нет записей</div>';
+            return;
+        }
+        const scrollPos = historyList.scrollTop;
+        const isScrolledToBottom = historyList.scrollHeight - historyList.clientHeight <= scrollPos + 10;
+        historyList.innerHTML = [...sttOnlyHistory].reverse().map(item => `
+            <div class="mb-2 p-2 border rounded">
+                <div class="d-flex justify-content-between mb-1">
+                    <small class="text-muted">${new Date(item.timestamp).toLocaleTimeString()}</small>
+                    <small class="badge bg-secondary">${item.language || 'auto'}</small>
+                </div>
+                <div class="mt-1">${sttEscapeHtml(item.text)}</div>
+            </div>
+        `).join('');
+        if (isScrolledToBottom) historyList.scrollTop = historyList.scrollHeight;
+    }
+    
+    function sttShowRecognizedText(text) {
+        if (text === sttLastRecognizedText) return;
+        sttLastRecognizedText = text;
+        const voiceTextDiv = document.getElementById('sttVoiceText');
+        const textSpan = document.getElementById('sttRecognizedText');
+        textSpan.innerHTML = text;
+        voiceTextDiv.style.display = 'block';
+        if (sttNotificationTimeout) clearTimeout(sttNotificationTimeout);
+        sttNotificationTimeout = setTimeout(() => {
+            voiceTextDiv.style.display = 'none';
+            sttNotificationTimeout = null;
+        }, 3000);
+    }
+    
+    async function sttUpdateStatus() {
+        try {
+            const response = await fetch("/api/stt/status");
+            const data = await response.json();
+            const statusBadge = document.getElementById("sttStatusBadge");
+            if (!data.model_loaded) {
+                statusBadge.className = "badge bg-danger";
+                statusBadge.innerHTML = "❌ Модель не загружена";
+            } else if (data.is_listening) {
+                if (data.is_speaking) {
+                    statusBadge.className = "badge bg-danger";
+                    statusBadge.innerHTML = "🎤 Слушаю... (речь)";
+                    document.getElementById("sttSpeakingIndicator").style.display = "block";
+                } else {
+                    statusBadge.className = "badge bg-success";
+                    statusBadge.innerHTML = "🎤 Слушаю... (ожидание)";
+                    document.getElementById("sttSpeakingIndicator").style.display = "none";
+                }
+            } else {
+                statusBadge.className = "badge bg-secondary";
+                statusBadge.innerHTML = "⏹️ Остановлено";
+                document.getElementById("sttSpeakingIndicator").style.display = "none";
+            }
+            document.getElementById("sttModelBadge").innerHTML = data.model_size;
+            if (data.current_text && data.current_text !== sttLastRecognizedText) sttShowRecognizedText(data.current_text);
+            sttUpdateHistoryDisplay(data.history);
+        } catch(e) {
+            console.error("Ошибка статуса STT:", e);
+        }
+    }
+    
+    async function sttStart() {
+        const response = await fetch("/api/stt/start", {method: "POST"});
+        const data = await response.json();
+        if (data.status === "ok") sttShowNotification("Распознавание запущено", "success");
+    }
+    async function sttStop() {
+        const response = await fetch("/api/stt/stop", {method: "POST"});
+        const data = await response.json();
+        if (data.status === "ok") {
+            sttShowNotification("Распознавание остановлено", "info");
+            sttLastRecognizedText = '';
+            document.getElementById('sttVoiceText').style.display = 'none';
+            if (sttNotificationTimeout) clearTimeout(sttNotificationTimeout);
+        }
+    }
+    async function sttRestart() {
+        const response = await fetch("/api/stt/restart", {method: "POST"});
+        const data = await response.json();
+        if (data.status === "ok") sttShowNotification("Распознавание перезапущено", "success");
+    }
+    function sttShowNotification(message, type) {
+        const notification = document.createElement("div");
+        notification.className = "alert alert-" + type + " position-fixed top-0 end-0 m-3";
+        notification.style.zIndex = "9999";
+        notification.style.background = type === "success" ? "#10b981" : (type === "error" ? "#ef4444" : "#3b82f6");
+        notification.style.color = "#ffffff";
+        notification.innerHTML = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 2000);
+    }
+    function sttEscapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    window.sttStart = sttStart;
+    window.sttStop = sttStop;
+    window.sttRestart = sttRestart;
+    sttStatusInterval = setInterval(sttUpdateStatus, 500);
+    sttUpdateStatus();
+    window.addEventListener("beforeunload", () => {
+        if (sttStatusInterval) clearInterval(sttStatusInterval);
+        if (sttNotificationTimeout) clearTimeout(sttNotificationTimeout);
+    });
+</script>
