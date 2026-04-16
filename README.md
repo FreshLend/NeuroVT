@@ -9,11 +9,12 @@
 ## ✨ Возможности
 
 - 🎤 **STT (Speech-to-Text)** — распознавание речи через `faster-whisper` с горячими клавишами
-- 🔊 **TTS (Text-to-Speech)** — синтез речи через Silero
-- 🧠 **LLM (Large Language Model)** — подключение к OpenRouter API
-- 💬 **Чат с AI** — сессии, контекст, автосохранение
+- 🔊 **TTS (Text-to-Speech)** — синтез речи через Silero с очередью и историей
+- 🧠 **LLM (Large Language Model)** — подключение к OpenRouter API с управлением контекстом
+- 💬 **Чат с AI** — сессии, контекст, счётчик токенов
 - ⚙️ **Веб-интерфейс** — настройки, статус, история, управление модулями
 - 🖥️ **CLI-менеджер** — установка, обновление, запуск (Windows/Linux)
+- 📁 **HTML-шаблоны модулей** — каждый модуль может иметь свои шаблоны
 
 ---
 
@@ -50,8 +51,11 @@ NeuroVT/
 ├── modules/
 │   ├── base_module.py      # Базовый класс для модулей
 │   ├── tts_module/         # TTS (Silero)
+│   │   └── templates/      # HTML-шаблоны TTS
 │   ├── stt_module/         # STT (Faster-Whisper)
+│   │   └── templates/      # HTML-шаблоны STT
 │   └── llm_module/         # LLM (OpenRouter)
+│       └── templates/      # HTML-шаблоны LLM
 └── templates/
     ├── base.html           # Общий шаблон
     ├── index.html          # Главная страница (вкладки модулей)
@@ -65,6 +69,7 @@ NeuroVT/
 - Модель: `faster-whisper` (small, int8)
 - Горячая клавиша: `Ctrl+Shift+M` (настраивается)
 - Распознаёт русский, английский и другие языки
+- Выбор языка распознавания (авто/русский/английский и др.)
 - Отправляет текст в LLM через событие `llm_voice_input`
 
 ### 🔊 TTS (Text-to-Speech)
@@ -76,8 +81,10 @@ NeuroVT/
 
 ### 🧠 LLM (OpenRouter)
 
-- Мгновенная смена контекста AI помнит только текущую сессию
+- Управление контекстом: ограничение по токенам, автообрезка истории
+- Подсчёт токенов через `tiktoken`
 - Fallback-ответы при отсутствии API-ключа
+- Интеграция с голосовым вводом (STT)
 
 ---
 
@@ -107,8 +114,9 @@ pip install -r modules/llm_module/requirements.txt
 1. Зарегистрируйтесь на [openrouter.ai](https://openrouter.ai)
 2. Создайте API-ключ
 3. В веб-интерфейсе перейдите в **Настройки → LLM**
-4. Вставьте ключ и выберите модель
-5. Нажмите **Сохранить все настройки**
+4. Вставьте ключ
+5. Настройте лимит контекста (токенов) при необходимости
+6. Нажмите **Сохранить все настройки**
 
 Без ключа будут использоваться fallback-ответы (офлайн-режим).
 
@@ -129,7 +137,8 @@ pip install -r modules/llm_module/requirements.txt
 ### Создание своего модуля
 
 1. Создайте папку в `modules/`, например `modules/my_module/`
-2. Создайте файл `my_module.py`:
+2. Создайте папку `templates/` внутри неё (для HTML-шаблонов)
+3. Создайте файл `my_module.py`:
 
 ```python
 from modules.base_module import BaseModule
@@ -145,15 +154,10 @@ class MyModule(BaseModule):
             return jsonify({"message": "Hello from my module!"})
     
     def register_main_tab(self):
-        return ("Моя вкладка", "<h3>Привет из моего модуля!</h3>")
+        return ("Моя вкладка", self.get_template_content("main_tab.html"))
     
     def register_settings_ui(self):
-        return """
-        <div class="mb-3">
-            <label class="form-label">Моя настройка</label>
-            <input type="text" class="form-control" id="mySetting">
-        </div>
-        """
+        return self.get_template_content("settings.html")
     
     def on_load(self):
         print(f"[{self.display_name}] Загружен!")
@@ -163,17 +167,30 @@ class MyModule(BaseModule):
         print(f"Получено событие: {data}")
 ```
 
-3. Добавьте `requirements.txt` в папку модуля (если нужны зависимости)
-4. Перезапустите NeuroVT — модуль загрузится автоматически
+4. Добавьте `requirements.txt` в папку модуля (если нужны зависимости)
+5. Создайте HTML-шаблоны в `modules/my_module/templates/`:
+   - `main_tab.html` — содержимое вкладки на главной странице
+   - `settings.html` — содержимое вкладки настроек
+6. Перезапустите NeuroVT — модуль загрузится автоматически
 
 ### События Event Bus
 
 | Событие | Отправитель | Данные |
 |---------|-------------|--------|
-| `tts_speak` | LLM | `{"text": "...", "source": "..."}` |
-| `tts_audio_ready` | TTS | `{"audio": bytes, "text": "..."}` |
-| `stt_text_ready` | STT | `{"text": "...", "is_final": true}` |
-| `llm_voice_input` | STT | `{"text": "...", "source": "microphone"}` |
+| `tts_speak` | LLM / любой модуль | `{"text": "...", "source": "..."}` |
+| `stt_text_ready` | STT | `{"text": "...", "is_final": true, "language": "..."}` |
+| `llm_voice_input` | STT | `{"text": "...", "source": "microphone", "timestamp": "..."}` |
+
+### Как подписаться на событие
+
+```python
+def on_load(self):
+    self.event_bus.subscribe("tts_speak", self.handle_tts)
+
+def handle_tts(self, data):
+    text = data.get("text", "")
+    print(f"Озвучить: {text}")
+```
 
 ## 📄 Лицензия
 
