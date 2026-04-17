@@ -1,5 +1,9 @@
 # 🧠 NeuroVT
 
+[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://python.org)
+[![Flask](https://img.shields.io/badge/Flask-3.1.3+-green.svg)](https://flask.palletsprojects.com)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **NeuroVT** — это модульная система для создания AI-втубера с поддержкой голосового ввода (STT), синтеза речи (TTS), языковых моделей (LLM) и веб-интерфейса на Flask.
 
 > 🎙️ Говорите — AI отвечает голосом.  
