@@ -26,9 +26,7 @@ class LLMModule(BaseModule):
     ]
     
     AVAILABLE_MODELS = {
-        "openrouter/free": "Free Models Router",
-        "z-ai/glm-4.5-air:free": "GLM 4.5 Air",
-        "arcee-ai/trinity-large-preview:free": "Trinity Large Preview"
+        "openrouter/free": "Free Models Router"
     }
     
     DEFAULT_TEMPERATURE = 0.7
