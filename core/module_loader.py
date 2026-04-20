@@ -1,6 +1,7 @@
 import os
 import importlib.util
 import sys
+import config
 
 def load_modules(app, event_bus, socketio, modules_dir="modules"):
     modules = []
@@ -15,6 +16,10 @@ def load_modules(app, event_bus, socketio, modules_dir="modules"):
     for folder_name in os.listdir(modules_dir):
         folder_path = os.path.join(modules_dir, folder_name)
         if not os.path.isdir(folder_path):
+            continue
+        
+        if folder_name in config.DISABLED_MODULES:
+            print(f"[LOADER] Модуль отключен: {folder_name}")
             continue
         
         module_files = [f for f in os.listdir(folder_path) if f.endswith('.py') and f != '__init__.py']
