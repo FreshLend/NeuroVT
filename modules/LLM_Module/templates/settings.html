@@ -44,6 +44,11 @@
                     <label class="form-label">System Prompt</label>
                     <textarea class="form-control" id="llmSystemPromptInput" rows="3"></textarea>
                 </div>
+                <div class="mb-3">
+                    <label class="form-label">Префикс для сообщений гостя (виртуальный микрофон)</label>
+                    <input type="text" class="form-control" id="llmGuestPrefixInput" value="Сообщение от гостя: ">
+                    <small class="text-muted">Будет добавлено перед текстом, распознанным с виртуального микрофона</small>
+                </div>
             </div>
         </div>
     </div>
@@ -89,6 +94,7 @@
             document.getElementById('llmMaxTokensInput').value = data.max_tokens;
             document.getElementById('llmContextLimitInput').value = data.context_token_limit;
             document.getElementById('llmSystemPromptInput').value = data.system_prompt;
+            document.getElementById('llmGuestPrefixInput').value = data.guest_prefix || 'Сообщение от гостя: ';
             document.getElementById('llmFallbackInput').value = data.fallback_responses.join('\n');
             const statusMsg = document.getElementById('llmStatusMessage');
             if (data.has_api_key) {
@@ -107,10 +113,11 @@
         const maxTokens = parseInt(document.getElementById('llmMaxTokensInput').value);
         const contextLimit = parseInt(document.getElementById('llmContextLimitInput').value);
         const systemPrompt = document.getElementById('llmSystemPromptInput').value;
+        const guestPrefix = document.getElementById('llmGuestPrefixInput').value;
         const fallbackText = document.getElementById('llmFallbackInput').value;
         const fallbackResponses = fallbackText.split('\n').filter(l => l.trim().length > 0);
         if (fallbackResponses.length === 0) { llmShowNotification('Добавьте хотя бы один fallback ответ', 'error'); return; }
-        const saveData = { openrouter_api_key: apiKey, model: model, temperature: temperature, max_tokens: maxTokens, context_token_limit: contextLimit, system_prompt: systemPrompt, fallback_responses: fallbackResponses };
+        const saveData = { openrouter_api_key: apiKey, model: model, temperature: temperature, max_tokens: maxTokens, context_token_limit: contextLimit, system_prompt: systemPrompt, fallback_responses: fallbackResponses, guest_prefix: guestPrefix };
         const response = await fetch('/api/llm/save_all_settings', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
@@ -126,7 +133,7 @@
         } else { llmShowNotification('❌ Ошибка сохранения', 'error'); }
     }
     async function llmResetAllSettings() {
-        if (!confirm('Сбросить ВСЕ настройки (модель, температуру, max tokens, лимит контекста, system prompt и fallback ответы) к значениям по умолчанию? API ключ не будет удалён.')) return;
+        if (!confirm('Сбросить ВСЕ настройки (модель, температуру, max tokens, лимит контекста, system prompt, префикс гостя и fallback ответы) к значениям по умолчанию? API ключ не будет удалён.')) return;
         const response = await fetch('/api/llm/reset_settings', {method: 'POST'});
         const data = await response.json();
         if (data.status === 'ok') {
@@ -143,6 +150,7 @@
             document.getElementById('llmMaxTokensInput').value = data.default_max_tokens;
             document.getElementById('llmContextLimitInput').value = data.default_context_limit;
             document.getElementById('llmSystemPromptInput').value = data.default_system_prompt;
+            document.getElementById('llmGuestPrefixInput').value = data.default_guest_prefix;
         } else { llmShowNotification('❌ Ошибка сброса настроек', 'error'); }
     }
     document.getElementById('llmTemperatureSlider').addEventListener('input', function() { document.getElementById('llmTemperatureValue').innerHTML = this.value; });

@@ -1,36 +1,34 @@
-<div class="row" id="stt-settings-container">
+<div class="row">
     <div class="col-md-6">
         <div class="card mb-3">
-            <div class="card-header">Устройство ввода</div>
+            <div class="card-header">Микрофон (основной)</div>
             <div class="card-body">
                 <div class="mb-3">
-                    <label class="form-label">Выберите микрофон</label>
+                    <label class="form-label">Выберите устройство</label>
                     <select class="form-select" id="sttDeviceSelect" onchange="sttChangeDevice()">
-                        <option value="">Загрузка устройств...</option>
+                        <option value="">Загрузка...</option>
                     </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Горячая клавиша</label>
+                    <input type="text" class="form-control" id="sttHotkeyInput" onchange="sttChangeHotkey()">
                 </div>
             </div>
         </div>
     </div>
     <div class="col-md-6">
         <div class="card mb-3">
-            <div class="card-header">Язык распознавания</div>
+            <div class="card-header">Виртуальный микрофон</div>
             <div class="card-body">
                 <div class="mb-3">
-                    <label class="form-label">Выберите язык для распознавания речи</label>
-                    <select class="form-select" id="sttLanguageSelect" onchange="sttChangeLanguage()">
-                        <option value="auto">🌐 Авто (определяется автоматически)</option>
-                        <option value="ru">🇷🇺 Русский</option>
-                        <option value="en">🇺🇸 English</option>
-                        <option value="fr">🇫🇷 Français</option>
-                        <option value="de">🇩🇪 Deutsch</option>
-                        <option value="es">🇪🇸 Español</option>
-                        <option value="it">🇮🇹 Italiano</option>
-                        <option value="zh">🇨🇳 中文</option>
-                        <option value="ja">🇯🇵 日本語</option>
-                        <option value="ko">🇰🇷 한국어</option>
+                    <label class="form-label">Выберите устройство</label>
+                    <select class="form-select" id="sttVirtualDeviceSelect" onchange="sttChangeVirtualDevice()">
+                        <option value="">Загрузка...</option>
                     </select>
-                    <small class="text-muted d-block mt-2">🌐 "Авто" - модель сама определит язык (рекомендуется для многоязычных сценариев)</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Горячая клавиша</label>
+                    <input type="text" class="form-control" id="sttVirtualHotkeyInput" onchange="sttChangeVirtualHotkey()">
                 </div>
             </div>
         </div>
@@ -39,13 +37,20 @@
 <div class="row">
     <div class="col-md-12">
         <div class="card mb-3">
-            <div class="card-header">Горячая клавиша</div>
+            <div class="card-header">Язык распознавания</div>
             <div class="card-body">
-                <div class="mb-3">
-                    <label class="form-label">Клавиша для включения/выключения микрофона</label>
-                    <input type="text" class="form-control" id="sttHotkeyInput" value="ctrl+shift+m" onchange="sttChangeHotkey()">
-                    <small class="text-muted d-block mt-2">Примеры: ctrl+shift+m, f1, alt+space, ctrl+alt+m</small>
-                </div>
+                <select class="form-select" id="sttLanguageSelect" onchange="sttChangeLanguage()">
+                    <option value="auto">🌐 Авто</option>
+                    <option value="ru">🇷🇺 Русский</option>
+                    <option value="en">🇺🇸 English</option>
+                    <option value="fr">🇫🇷 Français</option>
+                    <option value="de">🇩🇪 Deutsch</option>
+                    <option value="es">🇪🇸 Español</option>
+                    <option value="it">🇮🇹 Italiano</option>
+                    <option value="zh">🇨🇳 中文</option>
+                    <option value="ja">🇯🇵 日本語</option>
+                    <option value="ko">🇰🇷 한국어</option>
+                </select>
             </div>
         </div>
     </div>
@@ -72,7 +77,21 @@
             } else {
                 deviceSelect.innerHTML = '<option value="">Нет устройств</option>';
             }
+            const virtualSelect = document.getElementById('sttVirtualDeviceSelect');
+            virtualSelect.innerHTML = '';
+            if (data.available_devices && data.available_devices.length) {
+                for (const dev of data.available_devices) {
+                    const option = document.createElement('option');
+                    option.value = dev.index;
+                    option.textContent = dev.name;
+                    if (dev.index === data.virtual_device_index) option.selected = true;
+                    virtualSelect.appendChild(option);
+                }
+            } else {
+                virtualSelect.innerHTML = '<option value="">Нет устройств</option>';
+            }
             document.getElementById('sttHotkeyInput').value = data.hotkey || 'ctrl+shift+m';
+            document.getElementById('sttVirtualHotkeyInput').value = data.virtual_hotkey || 'ctrl+shift+v';
             const languageSelect = document.getElementById('sttLanguageSelect');
             const langValue = data.recognition_language || 'auto';
             for (let i = 0; i < languageSelect.options.length; i++) {
@@ -81,9 +100,9 @@
                     break;
                 }
             }
-            const statusText = data.is_listening ? '🎤 Микрофон включён' : '⏹️ Микрофон выключен';
-            const languageName = data.recognition_language ? data.recognition_language.toUpperCase() : 'Авто';
-            document.getElementById('sttSettingsText').innerHTML = `Модель: ${data.model_size} | Язык: ${languageName} | Хоткей: ${data.hotkey} | ${statusText} ${data.model_loaded ? '✅' : '⏳'}`;
+            const statusText = data.is_listening ? '🎤 Микрофон вкл' : '⏹️ Микрофон выкл';
+            const virtualStatusText = data.is_listening_virtual ? '🎧 Вирт. вкл' : '⏹️ Вирт. выкл';
+            document.getElementById('sttSettingsText').innerHTML = `Модель: ${data.model_size} | Язык: ${langValue} | ${statusText} | ${virtualStatusText} ${data.model_loaded ? '✅' : '⏳'}`;
         } catch(e) {
             console.error('Ошибка загрузки настроек STT:', e);
         }
@@ -101,22 +120,17 @@
             sttLoadSettings();
         }
     }
-    async function sttChangeLanguage() {
-        const select = document.getElementById("sttLanguageSelect");
-        let language = select.value;
-        if (language === "auto") language = "auto";
-        const response = await fetch("/api/stt/set_language", {
+    async function sttChangeVirtualDevice() {
+        const deviceIndex = parseInt(document.getElementById("sttVirtualDeviceSelect").value);
+        const response = await fetch("/api/stt/set_virtual_device", {
             method: "POST",
             headers: {"Content-Type": "application/json"},
-            body: JSON.stringify({language: language})
+            body: JSON.stringify({device_index: deviceIndex})
         });
         const data = await response.json();
         if (data.status === "ok") {
-            const langDisplay = data.recognition_language ? data.recognition_language.toUpperCase() : 'Авто';
-            sttShowNotification("Язык распознавания изменён: " + langDisplay, "success");
+            sttShowNotification("Виртуальное устройство изменено", "success");
             sttLoadSettings();
-        } else {
-            sttShowNotification("Ошибка: " + data.error, "error");
         }
     }
     async function sttChangeHotkey() {
@@ -130,6 +144,35 @@
         const data = await response.json();
         if (data.status === "ok") {
             sttShowNotification("Горячая клавиша изменена: " + hotkey, "success");
+            sttLoadSettings();
+        }
+    }
+    async function sttChangeVirtualHotkey() {
+        const hotkey = document.getElementById("sttVirtualHotkeyInput").value;
+        if (!hotkey) return;
+        const response = await fetch("/api/stt/set_virtual_hotkey", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({hotkey: hotkey})
+        });
+        const data = await response.json();
+        if (data.status === "ok") {
+            sttShowNotification("Горячая клавиша вирт. изменена: " + hotkey, "success");
+            sttLoadSettings();
+        }
+    }
+    async function sttChangeLanguage() {
+        const select = document.getElementById("sttLanguageSelect");
+        let language = select.value;
+        if (language === "auto") language = "auto";
+        const response = await fetch("/api/stt/set_language", {
+            method: "POST",
+            headers: {"Content-Type": "application/json"},
+            body: JSON.stringify({language: language})
+        });
+        const data = await response.json();
+        if (data.status === "ok") {
+            sttShowNotification("Язык изменён", "success");
             sttLoadSettings();
         } else {
             sttShowNotification("Ошибка: " + data.error, "error");
@@ -146,7 +189,9 @@
         setTimeout(() => notification.remove(), 2000);
     }
     window.sttChangeDevice = sttChangeDevice;
+    window.sttChangeVirtualDevice = sttChangeVirtualDevice;
     window.sttChangeHotkey = sttChangeHotkey;
+    window.sttChangeVirtualHotkey = sttChangeVirtualHotkey;
     window.sttChangeLanguage = sttChangeLanguage;
     sttLoadSettings();
 </script>

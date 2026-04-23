@@ -43,12 +43,36 @@
         </div>
     </div>
 </div>
+<script src="/socket.io/socket.io.js"></script>
 <script>
     let llmCurrentSessionId = null;
     let llmSessions = [];
     let llmCurrentModel = null;
     let llmContextLimit = 4096;
     let llmTypingTimeout = null;
+    let llmSocket = null;
+
+    function llmInitSocket() {
+        if (llmSocket) return;
+        llmSocket = io();
+        llmSocket.on('llm_new_message', (data) => {
+            if (data.session_id === llmCurrentSessionId) {
+                llmLoadSessionMessages(llmCurrentSessionId);
+                const currentSession = llmSessions.find(s => s.id === llmCurrentSessionId);
+                if (currentSession) {
+                    currentSession.message_count += 2;
+                    document.getElementById('llmContextSizeBadge').innerHTML = currentSession.message_count + ' сообщений';
+                    llmUpdateSessionInList(llmCurrentSessionId, currentSession.message_count);
+                }
+            } else {
+                const targetSession = llmSessions.find(s => s.id === data.session_id);
+                if (targetSession) {
+                    targetSession.message_count += 2;
+                    llmUpdateSessionInList(data.session_id, targetSession.message_count);
+                }
+            }
+        });
+    }
 
     async function llmLoadCurrentModel() {
         try {
@@ -114,17 +138,21 @@
                 document.getElementById('llmTokensBadge').innerHTML = '0/' + limit + ' токенов';
                 return; 
             }
-            chatMessages.innerHTML = data.messages.map(msg => `
-                <div class="chat-message ${msg.role === 'user' ? 'user' : 'ai'}">
-                    <div class="d-flex align-items-start">
-                        <div class="me-2"><i class="fas fa-${msg.role === 'user' ? 'user' : 'robot'}"></i></div>
-                        <div style="flex: 1;">
-                            <small class="text-secondary">${msg.role === 'user' ? 'Вы' : 'AI'} <span style="font-size: 0.7rem;">${new Date(msg.timestamp).toLocaleTimeString()}</span></small>
-                            <div class="mt-1">${llmEscapeHtml(msg.content)}</div>
+            chatMessages.innerHTML = data.messages.map(msg => {
+                let senderName = msg.role === 'user' ? (msg.is_guest ? 'Гость' : 'Вы') : 'AI';
+                let icon = msg.role === 'user' ? (msg.is_guest ? 'user-friends' : 'user') : 'robot';
+                return `
+                    <div class="chat-message ${msg.role === 'user' ? 'user' : 'ai'}">
+                        <div class="d-flex align-items-start">
+                            <div class="me-2"><i class="fas fa-${icon}"></i></div>
+                            <div style="flex: 1;">
+                                <small class="text-secondary">${senderName} <span style="font-size: 0.7rem;">${new Date(msg.timestamp).toLocaleTimeString()}</span></small>
+                                <div class="mt-1">${llmEscapeHtml(msg.content)}</div>
+                            </div>
                         </div>
                     </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
             chatMessages.scrollTop = chatMessages.scrollHeight;
             const limit = data.context_limit || llmContextLimit;
             const tokens = (data.context_tokens !== undefined) ? data.context_tokens : 0;
@@ -145,19 +173,19 @@
         const message = messageInput.value.trim();
         if (!message) return;
         if (!llmCurrentSessionId) await llmCreateNewSession();
-        llmAddMessageToChat(message, 'user');
+        llmAddMessageToChat(message, 'user', false);
         messageInput.value = '';
         llmShowTypingIndicator();
         try {
             const response = await fetch('/api/llm/chat', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({message: message, session_id: llmCurrentSessionId})
+                body: JSON.stringify({message: message, session_id: llmCurrentSessionId, is_guest: false})
             });
             const data = await response.json();
             llmHideTypingIndicator();
             if (data.api_error) llmShowApiError('Ошибка API: ' + data.api_error + '. Использован fallback ответ.');
-            llmAddMessageToChat(data.response, 'ai');
+            llmAddMessageToChat(data.response, 'ai', false);
             const currentSession = llmSessions.find(s => s.id === llmCurrentSessionId);
             if (currentSession) {
                 currentSession.message_count = data.context_size;
@@ -170,17 +198,26 @@
             if (data.model_used !== llmCurrentModel) await llmLoadCurrentModel();
         } catch(error) {
             llmHideTypingIndicator();
-            llmAddMessageToChat('Ошибка: ' + error.message, 'ai');
+            llmAddMessageToChat('Ошибка: ' + error.message, 'ai', false);
             llmShowApiError('Ошибка соединения: ' + error.message);
         }
     }
 
-    function llmAddMessageToChat(text, sender) {
+    function llmAddMessageToChat(text, sender, isGuest) {
         const chatMessages = document.getElementById('llmChatMessages');
         if (chatMessages.innerHTML.includes('Нет сообщений')) chatMessages.innerHTML = '';
+        let senderName = '';
+        let icon = '';
+        if (sender === 'user') {
+            senderName = isGuest ? 'Гость' : 'Вы';
+            icon = isGuest ? 'user-friends' : 'user';
+        } else {
+            senderName = 'AI';
+            icon = 'robot';
+        }
         const messageDiv = document.createElement('div');
         messageDiv.className = `chat-message ${sender}`;
-        messageDiv.innerHTML = `<div class="d-flex align-items-start"><div class="me-2"><i class="fas fa-${sender === 'user' ? 'user' : 'robot'}"></i></div><div style="flex: 1;"><small class="text-secondary">${sender === 'user' ? 'Вы' : 'AI'}</small><div class="mt-1">${llmEscapeHtml(text)}</div></div></div>`;
+        messageDiv.innerHTML = `<div class="d-flex align-items-start"><div class="me-2"><i class="fas fa-${icon}"></i></div><div style="flex: 1;"><small class="text-secondary">${senderName}</small><div class="mt-1">${llmEscapeHtml(text)}</div></div></div>`;
         chatMessages.appendChild(messageDiv);
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
@@ -297,5 +334,6 @@
     window.llmDeleteSession = llmDeleteSession;
     window.llmClearCurrentSession = llmClearCurrentSession;
     window.llmSendMessage = llmSendMessage;
+    llmInitSocket();
     llmLoadSessions();
 </script>

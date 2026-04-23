@@ -22,6 +22,12 @@ class TTSModule(BaseModule):
         "eugene": "Евгений (мужской)"
     }
     
+    OUTPUT_MODES = {
+        "speakers": "Только динамики",
+        "virtual": "Только виртуальный микрофон",
+        "both": "Динамики + виртуальный микрофон"
+    }
+    
     def __init__(self, app, event_bus, socketio):
         super().__init__(app, event_bus, socketio)
         self.model = None
@@ -36,9 +42,16 @@ class TTSModule(BaseModule):
         self.total_processed = 0
         
         self.pyaudio_instance = None
-        self.audio_stream = None
+        self.audio_stream_speakers = None
+        self.audio_stream_virtual = None
+        
+        self.output_device_speakers = None
+        self.output_device_virtual = None
+        self.output_mode = "speakers"
+        self.available_output_devices = []
         
         self.load_settings()
+        self.scan_output_devices()
         self.init_pyaudio()
     
     def init_pyaudio(self):
@@ -48,6 +61,24 @@ class TTSModule(BaseModule):
         except Exception as e:
             print(f"[TTS] Ошибка инициализации PyAudio: {e}")
     
+    def scan_output_devices(self):
+        try:
+            if not self.pyaudio_instance:
+                self.pyaudio_instance = pyaudio.PyAudio()
+            self.available_output_devices = []
+            for i in range(self.pyaudio_instance.get_device_count()):
+                device_info = self.pyaudio_instance.get_device_info_by_index(i)
+                if device_info['maxOutputChannels'] > 0:
+                    self.available_output_devices.append({
+                        'index': i,
+                        'name': device_info['name'],
+                        'channels': int(device_info['maxOutputChannels']),
+                        'sample_rate': int(device_info['defaultSampleRate'])
+                    })
+            print(f"[TTS] Найдено выходных устройств: {len(self.available_output_devices)}")
+        except Exception as e:
+            print(f"[TTS] Ошибка сканирования устройств вывода: {e}")
+    
     def load_settings(self):
         settings = self.load_module_settings()
         saved_voice = settings.get('voice')
@@ -56,11 +87,23 @@ class TTSModule(BaseModule):
         saved_rate = settings.get('sample_rate')
         if saved_rate in [24000, 48000]:
             self.sample_rate = saved_rate
+        self.output_mode = settings.get('output_mode', 'speakers')
+        self.output_device_speakers = settings.get('output_device_speakers')
+        self.output_device_virtual = settings.get('output_device_virtual')
+        if hasattr(self, 'available_output_devices') and self.available_output_devices:
+            if self.output_device_speakers is None:
+                self.output_device_speakers = self.available_output_devices[0]['index']
+            if self.output_device_virtual is None:
+                self.output_device_virtual = self.available_output_devices[0]['index']
+            self.save_settings()
     
     def save_settings(self):
         self.save_module_settings({
             'voice': self.speaker,
-            'sample_rate': self.sample_rate
+            'sample_rate': self.sample_rate,
+            'output_mode': self.output_mode,
+            'output_device_speakers': self.output_device_speakers,
+            'output_device_virtual': self.output_device_virtual
         })
     
     def load_model(self):
@@ -142,18 +185,42 @@ class TTSModule(BaseModule):
         return None, 0
     
     def play_audio(self, audio_bytes):
+        if self.output_mode == "speakers":
+            self._play_on_device(audio_bytes, self.output_device_speakers, "speakers")
+        elif self.output_mode == "virtual":
+            self._play_on_device(audio_bytes, self.output_device_virtual, "virtual")
+        elif self.output_mode == "both":
+            import threading
+            t1 = threading.Thread(target=self._play_on_device, args=(audio_bytes, self.output_device_speakers, "speakers"))
+            t2 = threading.Thread(target=self._play_on_device, args=(audio_bytes, self.output_device_virtual, "virtual"))
+            t1.start()
+            t2.start()
+            t1.join()
+            t2.join()
+    
+    def _play_on_device(self, audio_bytes, device_index, device_name):
         try:
-            if self.audio_stream is None:
-                self.audio_stream = self.pyaudio_instance.open(
+            stream = None
+            if device_name == "speakers" and self.audio_stream_speakers is not None:
+                stream = self.audio_stream_speakers
+            elif device_name == "virtual" and self.audio_stream_virtual is not None:
+                stream = self.audio_stream_virtual
+            if stream is None:
+                stream = self.pyaudio_instance.open(
                     format=pyaudio.paInt16,
                     channels=1,
                     rate=self.sample_rate,
                     output=True,
+                    output_device_index=device_index if device_index is not None else None,
                     frames_per_buffer=1024
                 )
-            self.audio_stream.write(audio_bytes)
+                if device_name == "speakers":
+                    self.audio_stream_speakers = stream
+                else:
+                    self.audio_stream_virtual = stream
+            stream.write(audio_bytes)
         except Exception as e:
-            print(f"[TTS] Ошибка воспроизведения: {e}")
+            print(f"[TTS] Ошибка воспроизведения на {device_name}: {e}")
     
     def tensor_to_wav(self, audio_tensor, sample_rate):
         try:
@@ -240,7 +307,10 @@ class TTSModule(BaseModule):
                 "total_processed": self.total_processed,
                 "history": self.speech_history[-10:],
                 "device": str(self.device),
-                "sample_rate": self.sample_rate
+                "sample_rate": self.sample_rate,
+                "output_mode": self.output_mode,
+                "output_device_speakers": self.output_device_speakers,
+                "output_device_virtual": self.output_device_virtual
             })
         
         @self.app.route('/api/tts/get_settings', methods=['GET'])
@@ -249,8 +319,49 @@ class TTSModule(BaseModule):
                 "voice": self.speaker,
                 "voice_name": self.VOICES.get(self.speaker, self.speaker),
                 "sample_rate": self.sample_rate,
-                "quality": f"{self.sample_rate//1000} кГц"
+                "quality": f"{self.sample_rate//1000} кГц",
+                "output_mode": self.output_mode,
+                "output_device_speakers": self.output_device_speakers,
+                "output_device_virtual": self.output_device_virtual,
+                "available_output_devices": self.available_output_devices,
+                "output_modes": self.OUTPUT_MODES
             })
+        
+        @self.app.route('/api/tts/set_output_mode', methods=['POST'])
+        def tts_set_output_mode():
+            data = request.json
+            mode = data.get('mode')
+            if mode in self.OUTPUT_MODES:
+                self.output_mode = mode
+                self.save_settings()
+                return jsonify({"status": "ok", "mode": mode})
+            return jsonify({"error": "Неверный режим"}), 400
+        
+        @self.app.route('/api/tts/set_output_device', methods=['POST'])
+        def tts_set_output_device():
+            data = request.json
+            device_type = data.get('type')
+            device_index = data.get('device_index')
+            if device_type == 'speakers':
+                self.output_device_speakers = device_index
+            elif device_type == 'virtual':
+                self.output_device_virtual = device_index
+            else:
+                return jsonify({"error": "Неверный тип"}), 400
+            self.save_settings()
+            if device_type == 'speakers' and self.audio_stream_speakers:
+                try:
+                    self.audio_stream_speakers.close()
+                except:
+                    pass
+                self.audio_stream_speakers = None
+            if device_type == 'virtual' and self.audio_stream_virtual:
+                try:
+                    self.audio_stream_virtual.close()
+                except:
+                    pass
+                self.audio_stream_virtual = None
+            return jsonify({"status": "ok"})
         
         @self.app.route('/api/tts/queue/clear', methods=['POST'])
         def tts_clear_queue():

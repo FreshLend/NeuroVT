@@ -15,6 +15,7 @@
                 <div class="mb-2"><strong>Всего озвучено:</strong> <span id="ttsTotalProcessed">0</span></div>
                 <div class="mb-2"><strong>Голос:</strong> <span id="ttsCurrentVoice">-</span></div>
                 <div class="mb-2"><strong>Качество:</strong> <span id="ttsQuality">-</span></div>
+                <div class="mb-2"><strong>Вывод:</strong> <span id="ttsOutputMode">-</span></div>
                 <button class="btn btn-primary" onclick="ttsTest()">Тест озвучки</button>
             </div>
         </div>
@@ -61,6 +62,11 @@
             document.getElementById('ttsTotalProcessed').innerHTML = data.total_processed;
             document.getElementById('ttsCurrentVoice').innerHTML = data.current_voice;
             document.getElementById('ttsQuality').innerHTML = (data.sample_rate / 1000) + ' кГц';
+            let modeText = '';
+            if (data.output_mode === 'speakers') modeText = 'Динамики';
+            else if (data.output_mode === 'virtual') modeText = 'Виртуальный микрофон';
+            else modeText = 'Динамики + Виртуальный микрофон';
+            document.getElementById('ttsOutputMode').innerHTML = modeText;
             const historyList = document.getElementById('ttsHistoryList');
             if (data.history.length === 0) {
                 historyList.innerHTML = '<div class="text-muted text-center">Нет сообщений</div>';
