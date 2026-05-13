@@ -1,0 +1,234 @@
+<div class="row" id="tts-settings-container">
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-header">Голос и параметры синтеза</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Референсный голос (из папки references)</label>
+                    <div class="d-flex gap-2">
+                        <select class="form-select flex-grow-1" id="ttsVoiceSelect" onchange="ttsChangeVoice()"></select>
+                        <button class="btn btn-outline-primary" onclick="ttsRescanVoices()" title="Обновить список голосов">
+                            <i class="fas fa-sync-alt"></i>
+                        </button>
+                    </div>
+                    <small class="text-muted">Поместите .wav файлы в modules/tts_module/references/ и нажмите обновить</small>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Exaggeration (экспрессия)</label>
+                    <input type="range" class="form-range" id="ttsExaggeration" min="0" max="1.5" step="0.01" onchange="ttsUpdateParams()">
+                    <span id="ttsExaggerationVal">0.85</span>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">CFG Weight (0 = чистое переключение языка)</label>
+                    <input type="range" class="form-range" id="ttsCfgWeight" min="0" max="2" step="0.01" onchange="ttsUpdateParams()">
+                    <span id="ttsCfgWeightVal">0.0</span>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Temperature (разнообразие интонаций)</label>
+                    <input type="range" class="form-range" id="ttsTemperature" min="0.05" max="5" step="0.01" onchange="ttsUpdateParams()">
+                    <span id="ttsTemperatureVal">0.85</span>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Min P</label>
+                    <input type="range" class="form-range" id="ttsMinP" min="0" max="1" step="0.01" onchange="ttsUpdateParams()">
+                    <span id="ttsMinPVal">0.05</span>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Top P</label>
+                    <input type="range" class="form-range" id="ttsTopP" min="0" max="1" step="0.01" onchange="ttsUpdateParams()">
+                    <span id="ttsTopPVal">1.0</span>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Repetition Penalty</label>
+                    <input type="range" class="form-range" id="ttsRepPenalty" min="1" max="3" step="0.1" onchange="ttsUpdateParams()">
+                    <span id="ttsRepPenaltyVal">2.0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card mb-3">
+            <div class="card-header">Вывод звука</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Режим вывода</label>
+                    <select class="form-select" id="ttsOutputModeSelect" onchange="ttsChangeOutputMode()">
+                        <option value="speakers">Только динамики</option>
+                        <option value="virtual">Только виртуальный микрофон</option>
+                        <option value="both">Динамики + виртуальный микрофон</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Устройство для динамиков</label>
+                    <select class="form-select" id="ttsOutputSpeakersSelect" onchange="ttsSetOutputDevice('speakers')"></select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Устройство для виртуального микрофона</label>
+                    <select class="form-select" id="ttsOutputVirtualSelect" onchange="ttsSetOutputDevice('virtual')"></select>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div class="alert alert-info" id="ttsCurrentSettings">Загрузка...</div>
+<script>
+    async function ttsLoadSettings() {
+        try {
+            const response = await fetch('/api/tts/chatterbox/get_settings');
+            const data = await response.json();
+            document.getElementById('ttsCurrentSettings').innerHTML = `
+                <i class="fas fa-info-circle me-2"></i>
+                Голос: ${data.voice || 'по умолчанию'} | Exaggeration: ${data.exaggeration} | CFG: ${data.cfg_weight} | Temp: ${data.temperature}
+            `;
+            const voiceSelect = document.getElementById('ttsVoiceSelect');
+            voiceSelect.innerHTML = '';
+            if (data.available_voices && data.available_voices.length) {
+                for (const v of data.available_voices) {
+                    const opt = document.createElement('option');
+                    opt.value = v.name;
+                    opt.textContent = v.name === 'default' ? 'Без клонирования (стандартный голос)' : v.name;
+                    if (v.name === data.voice) opt.selected = true;
+                    voiceSelect.appendChild(opt);
+                }
+            } else {
+                voiceSelect.innerHTML = '<option disabled>Нет референсных голосов</option>';
+            }
+            document.getElementById('ttsOutputModeSelect').value = data.output_mode;
+            document.getElementById('ttsExaggeration').value = data.exaggeration;
+            document.getElementById('ttsExaggerationVal').innerText = data.exaggeration;
+            document.getElementById('ttsCfgWeight').value = data.cfg_weight;
+            document.getElementById('ttsCfgWeightVal').innerText = data.cfg_weight;
+            document.getElementById('ttsTemperature').value = data.temperature;
+            document.getElementById('ttsTemperatureVal').innerText = data.temperature;
+            document.getElementById('ttsMinP').value = data.min_p;
+            document.getElementById('ttsMinPVal').innerText = data.min_p;
+            document.getElementById('ttsTopP').value = data.top_p;
+            document.getElementById('ttsTopPVal').innerText = data.top_p;
+            document.getElementById('ttsRepPenalty').value = data.repetition_penalty;
+            document.getElementById('ttsRepPenaltyVal').innerText = data.repetition_penalty;
+            const speakersSelect = document.getElementById('ttsOutputSpeakersSelect');
+            const virtualSelect = document.getElementById('ttsOutputVirtualSelect');
+            speakersSelect.innerHTML = '';
+            virtualSelect.innerHTML = '';
+            if (data.available_output_devices && data.available_output_devices.length) {
+                for (const dev of data.available_output_devices) {
+                    const optSpeakers = document.createElement('option');
+                    optSpeakers.value = dev.index;
+                    optSpeakers.textContent = dev.name;
+                    if (dev.index === data.output_device_speakers) optSpeakers.selected = true;
+                    speakersSelect.appendChild(optSpeakers);
+                    const optVirtual = document.createElement('option');
+                    optVirtual.value = dev.index;
+                    optVirtual.textContent = dev.name;
+                    if (dev.index === data.output_device_virtual) optVirtual.selected = true;
+                    virtualSelect.appendChild(optVirtual);
+                }
+            } else {
+                speakersSelect.innerHTML = '<option disabled>Нет устройств вывода</option>';
+                virtualSelect.innerHTML = '<option disabled>Нет устройств вывода</option>';
+            }
+        } catch(e) {
+            console.error('Ошибка загрузки настроек TTS:', e);
+        }
+    }
+    async function ttsChangeVoice() {
+        const voice = document.getElementById('ttsVoiceSelect').value;
+        const response = await fetch('/api/tts/chatterbox/voice', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({voice: voice})
+        });
+        const data = await response.json();
+        if (data.status === 'ok') {
+            ttsShowNotification('Голос изменён', 'success');
+            document.getElementById('ttsCurrentSettings').innerHTML = document.getElementById('ttsCurrentSettings').innerHTML.replace(
+                /Голос: .*? \|/, `Голос: ${data.voice} |`
+            );
+        } else {
+            ttsShowNotification('Ошибка смены голоса', 'error');
+        }
+    }
+    async function ttsRescanVoices() {
+        try {
+            const response = await fetch('/api/tts/chatterbox/rescan_voices', { method: 'POST' });
+            const data = await response.json();
+            if (data.status === 'ok') {
+                await ttsLoadSettings();
+                ttsShowNotification('Список голосов обновлен', 'success');
+            }
+        } catch(e) {
+            console.error(e);
+            ttsShowNotification('Ошибка обновления', 'error');
+        }
+    }
+    async function ttsUpdateParams() {
+        const exaggeration = parseFloat(document.getElementById('ttsExaggeration').value);
+        const cfg_weight = parseFloat(document.getElementById('ttsCfgWeight').value);
+        const temperature = parseFloat(document.getElementById('ttsTemperature').value);
+        const min_p = parseFloat(document.getElementById('ttsMinP').value);
+        const top_p = parseFloat(document.getElementById('ttsTopP').value);
+        const repetition_penalty = parseFloat(document.getElementById('ttsRepPenalty').value);
+        document.getElementById('ttsExaggerationVal').innerText = exaggeration;
+        document.getElementById('ttsCfgWeightVal').innerText = cfg_weight;
+        document.getElementById('ttsTemperatureVal').innerText = temperature;
+        document.getElementById('ttsMinPVal').innerText = min_p;
+        document.getElementById('ttsTopPVal').innerText = top_p;
+        document.getElementById('ttsRepPenaltyVal').innerText = repetition_penalty;
+        const response = await fetch('/api/tts/chatterbox/params', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({exaggeration, cfg_weight, temperature, min_p, top_p, repetition_penalty})
+        });
+        const data = await response.json();
+        if (data.status === 'ok') {
+            ttsShowNotification('Параметры синтеза обновлены', 'success');
+        }
+    }
+    async function ttsChangeOutputMode() {
+        const mode = document.getElementById('ttsOutputModeSelect').value;
+        const response = await fetch('/api/tts/chatterbox/set_output_mode', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({mode: mode})
+        });
+        const data = await response.json();
+        if (data.status === 'ok') {
+            ttsShowNotification('Режим вывода изменён', 'success');
+            ttsLoadSettings();
+        }
+    }
+    async function ttsSetOutputDevice(type) {
+        let deviceIndex = null;
+        if (type === 'speakers') {
+            deviceIndex = parseInt(document.getElementById('ttsOutputSpeakersSelect').value);
+        } else {
+            deviceIndex = parseInt(document.getElementById('ttsOutputVirtualSelect').value);
+        }
+        const response = await fetch('/api/tts/chatterbox/set_output_device', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({type: type, device_index: deviceIndex})
+        });
+        const data = await response.json();
+        if (data.status === 'ok') {
+            ttsShowNotification(`Устройство для ${type === 'speakers' ? 'динамиков' : 'виртуального микрофона'} изменено`, 'success');
+            ttsLoadSettings();
+        }
+    }
+    function ttsShowNotification(message, type) {
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type} position-fixed top-0 end-0 m-3`;
+        notification.style.zIndex = '9999';
+        notification.style.background = type === 'success' ? '#10b981' : '#ef4444';
+        notification.style.color = '#ffffff';
+        notification.innerHTML = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 2000);
+    }
+    window.ttsChangeVoice = ttsChangeVoice;
+    window.ttsRescanVoices = ttsRescanVoices;
+    window.ttsUpdateParams = ttsUpdateParams;
+    window.ttsChangeOutputMode = ttsChangeOutputMode;
+    window.ttsSetOutputDevice = ttsSetOutputDevice;
+    ttsLoadSettings();
+</script>

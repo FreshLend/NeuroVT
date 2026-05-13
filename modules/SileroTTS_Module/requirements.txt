@@ -1,0 +1,4 @@
+torch
+pyaudio
+numpy
+omegaconf
