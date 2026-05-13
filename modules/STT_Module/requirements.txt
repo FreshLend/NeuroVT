@@ -1,4 +1,0 @@
-pyaudio
-numpy
-faster_whisper
-keyboard
