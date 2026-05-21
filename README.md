@@ -92,7 +92,7 @@ chmod +x run.sh
 ### 4. Настройка клонирования голоса (Chatterbox TTS)
 
 1. Перейдите в **Настройки → TTS (Chatterbox)**
-2. Поместите `.wav` файлы с голосом в папку `modules/chatterbox-tts_module/references/`
+2. Поместите `.wav` файлы с голосом в папку `modules/ChatterboxTTS/references/`
 3. Нажмите кнопку обновления списка голосов
 4. Выберите нужный голос из выпадающего списка
 
@@ -111,18 +111,18 @@ NeuroVT/
 │   └── module_loader.py    # Загрузчик модулей
 ├── modules/
 │   ├── base_module.py      # Базовый класс для модулей
-│   ├── WhisperSTT_Module/ # STT (Faster-Whisper)
-│   │   ├── whisper-stt_module.py
+│   ├── WhisperSTT/ # STT (Faster-Whisper)
+│   │   ├── main.py
 │   │   └── templates/
-│   ├── SileroTTS_Module/  # TTS (Silero)
-│   │   ├── silero-tts_module.py
+│   ├── SileroTTS/  # TTS (Silero)
+│   │   ├── main.py
 │   │   └── templates/
-│   ├── ChatterboxTTS_Module/ # TTS (Chatterbox Multilingual с клонированием)
-│   │   ├── chatterbox-tts_module.py
+│   ├── ChatterboxTTS/ # TTS (Chatterbox Multilingual с клонированием)
+│   │   ├── main.py
 │   │   ├── references/     # 📁 папка для .wav файлов голосов
 │   │   └── templates/
-│   └── OpenAICompatibleLLM_Module/ # LLM (OpenAI-совместимые)
-│       ├── openai_compatible-llm_module.py
+│   └── OpenAICompatibleLLM/ # LLM (OpenAI-совместимые)
+│       ├── main.py
 │       └── templates/
 └── templates/              # Общие шаблоны
     ├── base.html
@@ -185,7 +185,7 @@ NeuroVT/
 В файле `config.py` можно отключить ненужные модули:
 
 ```python
-DISABLED_MODULES = ["SileroTTS_Module", "WhisperSTT_Module"]
+DISABLED_MODULES = ["SileroTTS", "WhisperSTT"]
 ```
 
 ---
@@ -258,9 +258,9 @@ pip install -r requirements.txt
 
 ## 🧩 Создание своего модуля
 
-1. Создайте папку в `modules/`, например `modules/my_module/`
+1. Создайте папку в `modules/`, например `modules/MyModule/`
 2. Создайте папку `templates/` внутри неё
-3. Создайте `my_module.py`:
+3. Создайте `main.py`:
 
 ```python
 from modules.base_module import BaseModule
@@ -287,7 +287,7 @@ class MyModule(BaseModule):
 ```
 
 4. Добавьте `requirements.txt` (если нужны зависимости)
-5. Создайте HTML-шаблоны в `modules/my_module/templates/`:
+5. Создайте HTML-шаблоны в `modules/MyModule/templates/`:
    - `main_tab.html` — содержимое вкладки на главной странице
    - `settings.html` — содержимое вкладки настроек
    - `filename.html` — своя страница если нужно что-то специфичное
@@ -298,7 +298,7 @@ class MyModule(BaseModule):
 
 | Проблема | Решение |
 |----------|---------|
-| Модуль не загружается | Проверьте `config.py` — не отключён ли модуль. Убедитесь, что в папке есть файл `*_module.py` |
+| Модуль не загружается | Проверьте `config.py` — не отключён ли модуль. Убедитесь, что в папке есть файл `main.py` |
 | STT не слышит микрофон | Проверьте выбранное устройство в настройках STT. |
 | TTS нет звука | Проверьте режим вывода и выбранное устройство. Попробуйте кнопку "Тест озвучки" |
 | OpenRouter не отвечает | Проверьте API-ключ и API Base URL. Нажмите "Сохранить все настройки". Без ключа работают fallback-ответы |
