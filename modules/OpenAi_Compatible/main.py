@@ -12,7 +12,7 @@ from openai import OpenAI
 from cryptography.fernet import Fernet
 
 class OpenAICompatible(BaseModule):
-    name = "openai_compatible"
+    name = "OpenAi_Compatible"
     display_name = "LLM (OpenAI Compatible)"
 
     FALLBACK_RESPONSES = [
