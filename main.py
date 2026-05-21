@@ -22,7 +22,7 @@ def load_global_settings():
                 try:
                     with open(module_settings_path, 'r', encoding='utf-8') as f:
                         module_settings = json.load(f)
-                        settings[module_folder.lower().replace('_module', '')] = module_settings
+                        settings[module_folder] = module_settings
                 except:
                     pass
     return settings
