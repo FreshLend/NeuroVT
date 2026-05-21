@@ -21,7 +21,7 @@
 - Визуальный индикатор речи в интерфейсе
 - История распознанных сообщений для каждого микрофона
 
-### 🔊 TTS (Text-to-Speech) — два движка на выбор
+### 🔊 TTS (Speech-to-Text) — два движка на выбор
 
 #### Silero TTS
 - Модель: Silero (v3_1_ru)
@@ -29,7 +29,7 @@
 - Качество: 24 кГц / 48 кГц
 
 #### Chatterbox TTS
-- **Клонирование голоса** — используйте любые `.wav` файлы в папке `references/`
+- **Клонирование голоса** — используйте любые `.wav` файлы в папке `references/` внутри модуля
 - Подробная настройка параметров синтеза:
   - Exaggeration (экспрессия) — от 0 до 1.5
   - CFG Weight — от 0 до 2
@@ -92,7 +92,7 @@ chmod +x run.sh
 ### 4. Настройка клонирования голоса (Chatterbox TTS)
 
 1. Перейдите в **Настройки → TTS (Chatterbox)**
-2. Поместите `.wav` файлы с голосом в папку `modules/ChatterboxTTS/references/`
+2. Поместите `.wav` файлы с голосом в папку `modules/Chatterbox/references/`
 3. Нажмите кнопку обновления списка голосов
 4. Выберите нужный голос из выпадающего списка
 
@@ -111,17 +111,17 @@ NeuroVT/
 │   └── module_loader.py    # Загрузчик модулей
 ├── modules/
 │   ├── base_module.py      # Базовый класс для модулей
-│   ├── WhisperSTT/ # STT (Faster-Whisper)
+│   ├── Whisper/            # STT (Faster-Whisper)
 │   │   ├── main.py
 │   │   └── templates/
-│   ├── SileroTTS/  # TTS (Silero)
+│   ├── Silero/             # TTS (Silero)
 │   │   ├── main.py
 │   │   └── templates/
-│   ├── ChatterboxTTS/ # TTS (Chatterbox Multilingual с клонированием)
+│   ├── Chatterbox/         # TTS (Chatterbox Multilingual с клонированием)
 │   │   ├── main.py
 │   │   ├── references/     # 📁 папка для .wav файлов голосов
 │   │   └── templates/
-│   └── OpenAICompatibleLLM/ # LLM (OpenAI-совместимые)
+│   └── OpenAICompatible/   # LLM (OpenAI-совместимые)
 │       ├── main.py
 │       └── templates/
 └── templates/              # Общие шаблоны
@@ -182,10 +182,10 @@ NeuroVT/
 
 ## 🔧 Конфигурация отключения модулей
 
-В файле `config.py` можно отключить ненужные модули:
+В файле `config.py` можно отключить ненужные модули, указав имена **папок** модулей:
 
 ```python
-DISABLED_MODULES = ["SileroTTS", "WhisperSTT"]
+DISABLED_MODULES = ["Silero", "Whisper"]
 ```
 
 ---
@@ -259,8 +259,8 @@ pip install -r requirements.txt
 ## 🧩 Создание своего модуля
 
 1. Создайте папку в `modules/`, например `modules/MyModule/`
-2. Создайте папку `templates/` внутри неё
-3. Создайте `main.py`:
+2. Внутри создайте файл **`main.py`** (обязательно) и папку `templates/`
+3. Пример `main.py`:
 
 ```python
 from modules.base_module import BaseModule
@@ -286,11 +286,12 @@ class MyModule(BaseModule):
         self.event_bus.subscribe("some_event", self.handle_event)
 ```
 
-4. Добавьте `requirements.txt` (если нужны зависимости)
-5. Создайте HTML-шаблоны в `modules/MyModule/templates/`:
-   - `main_tab.html` — содержимое вкладки на главной странице
-   - `settings.html` — содержимое вкладки настроек
-   - `filename.html` — своя страница если нужно что-то специфичное
+4. Добавьте HTML-шаблоны в `modules/MyModule/templates/`:
+   - `main_tab.html` - содержимое вкладки на главной странице
+   - `settings.html` - содержимое вкладки настроек
+   - `filename.html` - содержимое вашей страницы
+5. Добавьте requirements.txt или priority.txt (для тех что должны грузится первые) если нужны зависимости
+6. Чтобы отключить модуль, добавьте имя его папки в `config.DISABLED_MODULES`
 
 ---
 
