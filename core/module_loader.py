@@ -22,30 +22,34 @@ def load_modules(app, event_bus, socketio, modules_dir="modules"):
             print(f"[LOADER] Модуль отключен: {folder_name}")
             continue
         
-        module_files = [f for f in os.listdir(folder_path) if f.endswith('.py') and f != '__init__.py']
+        main_file = os.path.join(folder_path, "main.py")
+        if not os.path.exists(main_file):
+            continue
         
-        for filename in module_files:
-            if filename.endswith('_module.py'):
-                try:
-                    module_name = filename[:-3]
-                    spec = importlib.util.spec_from_file_location(
-                        f"modules.{folder_name}.{module_name}",
-                        os.path.join(folder_path, filename)
-                    )
-                    if spec and spec.loader:
-                        mod = importlib.util.module_from_spec(spec)
-                        sys.modules[f"modules.{folder_name}.{module_name}"] = mod
-                        spec.loader.exec_module(mod)
-                        
-                        from modules.base_module import BaseModule
-                        for attr_name in dir(mod):
-                            attr = getattr(mod, attr_name)
-                            if (isinstance(attr, type) and issubclass(attr, BaseModule) 
-                                and attr != BaseModule):
-                                instance = attr(app, event_bus, socketio)
-                                modules.append(instance)
-                                print(f"[LOADER] Загружен: {instance.display_name}")
-                except Exception as e:
-                    print(f"[LOADER] Ошибка {filename}: {e}")
+        try:
+            spec = importlib.util.spec_from_file_location(
+                f"modules.{folder_name}.main",
+                main_file
+            )
+            if spec and spec.loader:
+                mod = importlib.util.module_from_spec(spec)
+                sys.modules[f"modules.{folder_name}.main"] = mod
+                spec.loader.exec_module(mod)
+                
+                from modules.base_module import BaseModule
+                module_classes = []
+                for attr_name in dir(mod):
+                    attr = getattr(mod, attr_name)
+                    if (isinstance(attr, type) and issubclass(attr, BaseModule) 
+                        and attr != BaseModule):
+                        module_classes.append(attr)
+                
+                if module_classes:
+                    module_class = module_classes[0]
+                    instance = module_class(app, event_bus, socketio)
+                    modules.append(instance)
+                    print(f"[LOADER] Загружен: {instance.display_name} (из {folder_name})")
+        except Exception as e:
+            print(f"[LOADER] Ошибка загрузки модуля {folder_name}: {e}")
     
     return modules
