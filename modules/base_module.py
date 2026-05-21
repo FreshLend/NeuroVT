@@ -1,5 +1,6 @@
 import json
 import os
+import inspect
 
 class BaseModule:
     name = "base_module"
@@ -9,7 +10,9 @@ class BaseModule:
         self.app = app
         self.event_bus = event_bus
         self.socketio = socketio
-        self.module_dir = os.path.join("modules", self.__class__.__name__.replace("Module", "_Module"))
+        
+        module_file = inspect.getfile(self.__class__)
+        self.module_dir = os.path.dirname(module_file)
         self.settings_file = os.path.join(self.module_dir, "settings.json")
         self.templates_dir = os.path.join(self.module_dir, "templates")
     
