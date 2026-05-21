@@ -1,5 +1,4 @@
 torch
 numpy
-chatterbox-tts
 pyaudio
 git+https://github.com/Vuizur/add-stress-to-epub
