@@ -13,8 +13,8 @@ from modules.base_module import BaseModule
 from datetime import datetime
 from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 
-class ChatterboxTTS(BaseModule):
-    name = "chatterbox_tts"
+class Chatterbox(BaseModule):
+    name = "Chatterbox"
     display_name = "TTS (Chatterbox)"
 
     OUTPUT_MODES = {
