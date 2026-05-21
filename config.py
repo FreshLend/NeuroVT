@@ -1,1 +1,1 @@
-DISABLED_MODULES = ["Silero"] # ["Chatterbox", "Silero", "Whisper", "OpenAI_Compatible"]
+DISABLED_MODULES = ["Silero"] # ["Chatterbox", "Silero", "Whisper", "OpenAi_Compatible"]
