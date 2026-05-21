@@ -28,6 +28,24 @@ if "%choice%"=="3" goto update
 if "%choice%"=="0" exit /b
 goto menu
 
+:: Install Priority Dependencies
+:install_priority_deps
+set "module_path=%~1"
+if exist "%module_path%\priority.txt" (
+    echo Installing priority dependencies for module: %~nx1
+    for /f "usebackq delims=" %%i in ("%module_path%\priority.txt") do (
+        if not "%%i"=="" (
+            echo   Installing: %%i
+            pip install %%i
+            if %ERRORLEVEL% NEQ 0 (
+                echo   Warning: Failed to install priority package %%i
+            )
+        )
+    )
+    echo ✓ Priority dependencies installed for %~nx1
+)
+exit /b 0
+
 :: Install Module Dependencies
 :install_module_deps
 set "module_path=%~1"
@@ -61,6 +79,7 @@ echo Checking for module dependencies...
 
 if exist "modules\" (
     for /d %%i in ("modules\*") do (
+        call :install_priority_deps "%%i"
         call :install_module_deps "%%i"
     )
 ) else (

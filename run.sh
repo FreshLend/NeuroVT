@@ -23,6 +23,24 @@ show_menu() {
     echo
 }
 
+install_priority_dependencies() {
+    local module_path=$1
+    if [ -f "$module_path/priority.txt" ]; then
+        echo "Installing priority dependencies for module: $(basename $module_path)"
+        while IFS= read -r package; do
+            if [ -n "$package" ] && [[ ! "$package" =~ ^[[:space:]]*# ]]; then
+                echo "  Installing: $package"
+                pip install "$package"
+                if [ $? -ne 0 ]; then
+                    echo "  Warning: Failed to install priority package $package"
+                fi
+            fi
+        done < "$module_path/priority.txt"
+        echo "✓ Priority dependencies installed for $(basename $module_path)"
+    fi
+    return 0
+}
+
 install_module_dependencies() {
     local module_path=$1
     if [ -f "$module_path/requirements.txt" ]; then
@@ -56,6 +74,7 @@ install_all_dependencies() {
     if [ -d "modules" ]; then
         for module_dir in modules/*/; do
             if [ -d "$module_dir" ]; then
+                install_priority_dependencies "$module_dir"
                 install_module_dependencies "$module_dir"
             fi
         done
