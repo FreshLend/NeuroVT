@@ -1,1 +1,499 @@
+<div class="row" id="llm-module-container">
+    <div class="col-md-4">
+        <div class="card mb-3">
+            <div class="card-header">
+                <i class="fas fa-comments me-2"></i>
+                Сессии чатов
+                <button class="btn btn-sm btn-primary float-end" onclick="llmCreateNewSession()">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+            <div class="card-body" style="max-height: 500px; overflow-y: auto; padding: 0;">
+                <div id="llmSessionsList" class="list-group list-group-flush">
+                    <div class="text-center p-3">Загрузка...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-comment me-2"></i><span id="llmCurrentSessionName">Загрузка...</span></span>
+                <div>
+                    <span class="badge bg-info me-2" id="llmCurrentModelBadge">Загрузка...</span>
+                    <span class="badge bg-secondary me-2" id="llmContextSizeBadge">0 сообщений</span>
+                    <span class="badge bg-dark" id="llmTokensBadge">0/4096 токенов</span>
+                    <button class="btn btn-sm btn-outline-danger" onclick="llmClearCurrentSession()" title="Очистить историю"><i class="fas fa-trash"></i></button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="llmApiErrorAlert" class="alert alert-danger mb-3" style="display: none;">
+                    <i class="fas fa-exclamation-triangle me-2"></i><span id="llmApiErrorMessage"></span>
+                </div>
+                <div class="chat-log" id="llmChatMessages" style="height: 400px; overflow-y: auto;">
+                    <div class="text-center text-muted p-3">Выберите сессию или создайте новую</div>
+                </div>
+                <div class="mt-3">
+                    <div class="input-group">
+                        <textarea class="form-control" id="llmMessageInput" rows="3" placeholder="Напишите сообщение... (Enter - отправить, Shift+Enter - новая строка)" style="resize: vertical;"></textarea>
+                        <button class="btn btn-primary" onclick="llmSendMessage()" id="llmSendBtn"><i class="fas fa-paper-plane"></i> Отправить</button>
+                        <button class="btn btn-danger" onclick="llmStopGeneration()" id="llmStopBtn" style="display: none;"><i class="fas fa-stop"></i> Остановить</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    let llmCurrentSessionId = null;
+    let llmSessions = [];
+    let llmCurrentModel = null;
+    let llmContextLimit = 4096;
+    let llmTypingTimeout = null;
+    let llmSocket = null;
+    let llmCurrentStreamController = null;
+    let llmStreamingMessageDiv = null;
+    let llmStreamingContent = '';
+    let llmLastUserMessage = '';
+    let llmLastIsGuest = false;
 
+    function llmInitSocket() {
+        if (llmSocket) return;
+        llmSocket = io();
+        llmSocket.on('llm_new_message', (data) => {
+            if (data.session_id === llmCurrentSessionId) {
+                llmLoadSessionMessages(llmCurrentSessionId);
+                const currentSession = llmSessions.find(s => s.id === llmCurrentSessionId);
+                if (currentSession) {
+                    currentSession.message_count += 2;
+                    document.getElementById('llmContextSizeBadge').innerHTML = currentSession.message_count + ' сообщений';
+                    llmUpdateSessionInList(llmCurrentSessionId, currentSession.message_count);
+                }
+            } else {
+                const targetSession = llmSessions.find(s => s.id === data.session_id);
+                if (targetSession) {
+                    targetSession.message_count += 2;
+                    llmUpdateSessionInList(data.session_id, targetSession.message_count);
+                }
+            }
+        });
+        llmSocket.on('llm_stream_chunk', (data) => {
+            if (data.session_id === llmCurrentSessionId) {
+                llmAppendStreamChunk(data.chunk);
+            }
+        });
+        llmSocket.on('llm_stream_end', (data) => {
+            if (data.session_id === llmCurrentSessionId) {
+                llmFinishStreamMessage(data.full_response, data.session_id);
+            }
+        });
+        llmSocket.on('llm_stream_error', (data) => {
+            llmFinishStreamError(data.error);
+        });
+    }
+
+    async function llmLoadCurrentModel() {
+        try {
+            const response = await fetch('/api/llm/openai_compatible/get_settings');
+            const data = await response.json();
+            llmCurrentModel = data.model;
+            llmContextLimit = data.context_token_limit;
+            const modelName = data.models[data.model] || data.model;
+            document.getElementById('llmCurrentModelBadge').innerHTML = '<i class="fas fa-brain me-1"></i>' + modelName;
+        } catch(e) { console.error(e); }
+    }
+
+    async function llmLoadSessions() {
+        try {
+            const response = await fetch('/api/llm/openai_compatible/sessions');
+            const data = await response.json();
+            llmSessions = data.sessions;
+            llmCurrentSessionId = data.current_id;
+            const sessionsList = document.getElementById('llmSessionsList');
+            if (llmSessions.length === 0) { sessionsList.innerHTML = '<div class="text-center text-muted p-3">Нет сессий</div>'; return; }
+            sessionsList.innerHTML = llmSessions.map(session => `
+                <div class="list-group-item list-group-item-action ${session.is_current ? 'active' : ''}" data-session-id="${session.id}" style="background: ${session.is_current ? 'rgba(99, 102, 241, 0.2)' : 'transparent'}; cursor: pointer; border-left: 3px solid ${session.is_current ? '#6366f1' : 'transparent'};">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div onclick="llmSwitchSession('${session.id}')" style="flex: 1; cursor: pointer;">
+                            <i class="fas fa-comment me-2"></i><strong id="llmName-${session.id}">${llmEscapeHtml(session.name)}</strong><br>
+                            <small class="text-muted">${session.message_count} сообщений</small>
+                        </div>
+                        <div>
+                            <button class="btn btn-sm btn-outline-secondary me-1" onclick="llmRenameSession('${session.id}')" title="Переименовать"><i class="fas fa-pencil-alt"></i></button>
+                            <button class="btn btn-sm btn-outline-danger" onclick="llmDeleteSession('${session.id}')" title="Удалить"><i class="fas fa-times"></i></button>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            const currentSession = llmSessions.find(s => s.id === llmCurrentSessionId);
+            if (currentSession) {
+                document.getElementById('llmCurrentSessionName').innerHTML = currentSession.name;
+                document.getElementById('llmContextSizeBadge').innerHTML = currentSession.message_count + ' сообщений';
+                await llmLoadSessionMessages(llmCurrentSessionId);
+            }
+            await llmLoadCurrentModel();
+        } catch(e) { console.error(e); }
+    }
+
+    function llmUpdateSessionInList(sessionId, newMessageCount, newName = null) {
+        const sessionItem = document.querySelector(`.list-group-item[data-session-id="${sessionId}"]`);
+        if (sessionItem) {
+            const nameSpan = document.getElementById(`llmName-${sessionId}`);
+            if (newName && nameSpan) nameSpan.innerHTML = llmEscapeHtml(newName);
+            const small = sessionItem.querySelector('small');
+            if (small) small.innerHTML = newMessageCount + ' сообщений';
+        }
+    }
+
+    async function llmLoadSessionMessages(sessionId) {
+        try {
+            const response = await fetch(`/api/llm/openai_compatible/sessions/messages/${sessionId}`);
+            const data = await response.json();
+            const chatMessages = document.getElementById('llmChatMessages');
+            if (data.messages.length === 0) { 
+                chatMessages.innerHTML = '<div class="text-center text-muted p-3">Нет сообщений. Напишите что-нибудь!</div>';
+                const limit = data.context_limit || llmContextLimit;
+                document.getElementById('llmTokensBadge').innerHTML = '0/' + limit + ' токенов';
+                return; 
+            }
+            chatMessages.innerHTML = data.messages.map(msg => {
+                let senderName = msg.role === 'user' ? (msg.is_guest ? 'Гость' : 'Вы') : 'AI';
+                let icon = msg.role === 'user' ? (msg.is_guest ? 'user-friends' : 'user') : 'robot';
+                return `
+                    <div class="chat-message ${msg.role === 'user' ? 'user' : 'ai'}">
+                        <div class="d-flex align-items-start">
+                            <div class="me-2"><i class="fas fa-${icon}"></i></div>
+                            <div style="flex: 1;">
+                                <small class="text-secondary">${senderName} <span style="font-size: 0.7rem;">${new Date(msg.timestamp).toLocaleTimeString()}</span></small>
+                                <div class="mt-1" style="white-space: pre-wrap; word-wrap: break-word;">${llmEscapeHtml(msg.content)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            const limit = data.context_limit || llmContextLimit;
+            const tokens = (data.context_tokens !== undefined) ? data.context_tokens : 0;
+            document.getElementById('llmTokensBadge').innerHTML = tokens + '/' + limit + ' токенов';
+        } catch(e) { console.error(e); }
+    }
+
+    function llmShowApiError(message) {
+        const alertDiv = document.getElementById('llmApiErrorAlert');
+        const messageSpan = document.getElementById('llmApiErrorMessage');
+        messageSpan.innerHTML = message;
+        alertDiv.style.display = 'block';
+        setTimeout(() => alertDiv.style.display = 'none', 5000);
+    }
+
+    function llmShowTypingIndicator() {
+        llmHideTypingIndicator();
+        const chatMessages = document.getElementById('llmChatMessages');
+        const indicator = document.createElement('div');
+        indicator.id = 'llmTypingIndicator';
+        indicator.className = 'chat-message ai';
+        indicator.innerHTML = `<div class="d-flex"><div class="spinner-border spinner-border-sm me-2"></div><span>Генерация...</span></div>`;
+        chatMessages.appendChild(indicator);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        if (llmTypingTimeout) clearTimeout(llmTypingTimeout);
+        llmTypingTimeout = setTimeout(() => {
+            if (document.getElementById('llmTypingIndicator')) {
+                llmHideTypingIndicator();
+                llmShowApiError('Генерация слишком долгая. Проверьте интернет или API ключ.');
+            }
+        }, 60000);
+    }
+
+    function llmHideTypingIndicator() {
+        const indicator = document.getElementById('llmTypingIndicator');
+        if (indicator) indicator.remove();
+        if (llmTypingTimeout) clearTimeout(llmTypingTimeout);
+    }
+
+    function llmCreateStreamingMessage() {
+        llmRemoveStreamingMessage();
+        const chatMessages = document.getElementById('llmChatMessages');
+        if (chatMessages.innerHTML.includes('Нет сообщений')) chatMessages.innerHTML = '';
+        const messageDiv = document.createElement('div');
+        messageDiv.id = 'llmStreamingMessage';
+        messageDiv.className = 'chat-message ai';
+        messageDiv.innerHTML = `
+            <div class="d-flex align-items-start">
+                <div class="me-2"><i class="fas fa-robot"></i></div>
+                <div style="flex: 1;">
+                    <small class="text-secondary">AI <span style="font-size: 0.7rem;">(печатает...)</span></small>
+                    <div class="mt-1" id="llmStreamingContent" style="white-space: pre-wrap; word-wrap: break-word;"></div>
+                </div>
+            </div>
+        `;
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        llmStreamingContent = '';
+        document.getElementById('llmSendBtn').disabled = true;
+        document.getElementById('llmStopBtn').style.display = 'inline-block';
+    }
+
+    function llmAppendStreamChunk(chunk) {
+        if (!document.getElementById('llmStreamingMessage')) {
+            llmCreateStreamingMessage();
+        }
+        llmStreamingContent += chunk;
+        const contentDiv = document.getElementById('llmStreamingContent');
+        if (contentDiv) {
+            contentDiv.innerHTML = llmEscapeHtml(llmStreamingContent);
+            const chatMessages = document.getElementById('llmChatMessages');
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+    }
+
+    function llmRemoveStreamingMessage() {
+        const streamingMsg = document.getElementById('llmStreamingMessage');
+        if (streamingMsg) streamingMsg.remove();
+    }
+
+    function llmFinishStreamMessage(fullResponse, sessionId) {
+        llmRemoveStreamingMessage();
+        document.getElementById('llmSendBtn').disabled = false;
+        document.getElementById('llmStopBtn').style.display = 'none';
+        if (fullResponse && fullResponse.trim()) {
+            llmAddMessageToChat(fullResponse, 'ai', false);
+        }
+        llmCurrentStreamController = null;
+        llmStreamingContent = '';
+    }
+
+    async function llmStopGeneration() {
+        if (llmCurrentStreamController) {
+            llmCurrentStreamController.abort();
+            llmCurrentStreamController = null;
+        }
+        
+        const partialText = llmStreamingContent;
+        if (partialText && partialText.trim() && llmLastUserMessage) {
+            try {
+                await fetch('/api/llm/openai_compatible/save_partial', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        session_id: llmCurrentSessionId,
+                        partial_text: partialText,
+                        user_message: llmLastUserMessage,
+                        is_guest: llmLastIsGuest
+                    })
+                });
+                llmAddMessageToChat(partialText, 'ai', false);
+            } catch(e) {
+                console.error('Ошибка сохранения частичного ответа:', e);
+            }
+        }
+        
+        llmRemoveStreamingMessage();
+        document.getElementById('llmSendBtn').disabled = false;
+        document.getElementById('llmStopBtn').style.display = 'none';
+        llmStreamingContent = '';
+        llmLastUserMessage = '';
+    }
+
+    async function llmSendMessage() {
+        const messageInput = document.getElementById('llmMessageInput');
+        const message = messageInput.value;
+        if (!message.trim()) return;
+        if (!llmCurrentSessionId) await llmCreateNewSession();
+        
+        llmLastUserMessage = message;
+        llmLastIsGuest = false;
+        
+        llmAddMessageToChat(message, 'user', false);
+        messageInput.value = '';
+        llmCreateStreamingMessage();
+        
+        try {
+            llmCurrentStreamController = new AbortController();
+            const response = await fetch('/api/llm/openai_compatible/chat_stream', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({message: message, session_id: llmCurrentSessionId, is_guest: false}),
+                signal: llmCurrentStreamController.signal
+            });
+            
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            
+            while (true) {
+                const {done, value} = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, {stream: true});
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        if (data === '[DONE]') continue;
+                        
+                        try {
+                            const parsed = JSON.parse(data);
+                            if (parsed.chunk) {
+                                llmAppendStreamChunk(parsed.chunk);
+                            }
+                            if (parsed.done) {
+                                llmFinishStreamMessage(parsed.full_response, llmCurrentSessionId);
+                                await llmLoadSessionMessages(llmCurrentSessionId);
+                                llmLastUserMessage = '';
+                                return;
+                            }
+                            if (parsed.error) {
+                                llmFinishStreamMessage(parsed.chunk, llmCurrentSessionId);
+                                llmShowApiError('Ошибка: ' + parsed.error);
+                                llmLastUserMessage = '';
+                                return;
+                            }
+                        } catch (e) {
+                            console.error('Parse error:', e);
+                        }
+                    }
+                }
+            }
+            
+            llmFinishStreamMessage(llmStreamingContent, llmCurrentSessionId);
+            await llmLoadSessionMessages(llmCurrentSessionId);
+            llmCurrentStreamController = null;
+            llmLastUserMessage = '';
+            
+        } catch(error) {
+            if (error.name === 'AbortError') {
+                // пользователь остановил, уже обработано в llmStopGeneration
+            } else {
+                llmRemoveStreamingMessage();
+                llmAddMessageToChat('Ошибка: ' + error.message, 'ai', false);
+                llmShowApiError('Ошибка соединения: ' + error.message);
+                document.getElementById('llmSendBtn').disabled = false;
+                document.getElementById('llmStopBtn').style.display = 'none';
+                llmCurrentStreamController = null;
+                llmLastUserMessage = '';
+            }
+        }
+    }
+
+    function llmAddMessageToChat(text, sender, isGuest) {
+        const chatMessages = document.getElementById('llmChatMessages');
+        if (chatMessages.innerHTML.includes('Нет сообщений')) chatMessages.innerHTML = '';
+        let senderName = '';
+        let icon = '';
+        if (sender === 'user') {
+            senderName = isGuest ? 'Гость' : 'Вы';
+            icon = isGuest ? 'user-friends' : 'user';
+        } else {
+            senderName = 'AI';
+            icon = 'robot';
+        }
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `chat-message ${sender}`;
+        messageDiv.innerHTML = `<div class="d-flex align-items-start"><div class="me-2"><i class="fas fa-${icon}"></i></div><div style="flex: 1;"><small class="text-secondary">${senderName}</small><div class="mt-1" style="white-space: pre-wrap; word-wrap: break-word;">${llmEscapeHtml(text)}</div></div></div>`;
+        chatMessages.appendChild(messageDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    async function llmCreateNewSession() {
+        const name = prompt('Введите название сессии:', 'Новый чат');
+        if (!name) return;
+        const response = await fetch('/api/llm/openai_compatible/sessions/create', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: name})
+        });
+        const data = await response.json();
+        if (data.status === 'ok') { await llmLoadSessions(); llmShowNotification('Сессия создана', 'success'); }
+    }
+
+    async function llmSwitchSession(sessionId) {
+        if (llmCurrentStreamController) {
+            llmCurrentStreamController.abort();
+        }
+        const response = await fetch(`/api/llm/openai_compatible/sessions/switch/${sessionId}`, {method: 'POST'});
+        const data = await response.json();
+        if (data.status === 'ok') {
+            llmCurrentSessionId = sessionId;
+            await llmLoadSessions();
+            llmShowNotification('Сессия переключена', 'success');
+        }
+    }
+
+    async function llmRenameSession(sessionId) {
+        const session = llmSessions.find(s => s.id === sessionId);
+        const newName = prompt('Введите новое название:', session.name);
+        if (!newName || newName === session.name) return;
+        const response = await fetch(`/api/llm/openai_compatible/sessions/rename/${sessionId}`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({name: newName})
+        });
+        const data = await response.json();
+        if (data.status === 'ok') {
+            session.name = newName;
+            document.getElementById('llmCurrentSessionName').innerHTML = newName;
+            llmUpdateSessionInList(sessionId, session.message_count, newName);
+            llmShowNotification('Сессия переименована', 'success');
+        }
+    }
+
+    async function llmDeleteSession(sessionId) {
+        if (!confirm('Удалить эту сессию?')) return;
+        const response = await fetch(`/api/llm/openai_compatible/sessions/delete/${sessionId}`, {method: 'DELETE'});
+        const data = await response.json();
+        if (data.status === 'ok') { await llmLoadSessions(); llmShowNotification('Сессия удалена', 'success'); }
+    }
+
+    async function llmClearCurrentSession() {
+        if (!llmCurrentSessionId) return;
+        if (!confirm('Очистить всю историю сообщений в этой сессии?')) return;
+        const response = await fetch(`/api/llm/openai_compatible/sessions/clear/${llmCurrentSessionId}`, {method: 'POST'});
+        const data = await response.json();
+        if (data.status === 'ok') {
+            await llmLoadSessionMessages(llmCurrentSessionId);
+            document.getElementById('llmContextSizeBadge').innerHTML = '0 сообщений';
+            const currentSession = llmSessions.find(s => s.id === llmCurrentSessionId);
+            if (currentSession) {
+                currentSession.message_count = 0;
+                llmUpdateSessionInList(llmCurrentSessionId, 0);
+            }
+            llmShowNotification('История очищена', 'success');
+        }
+    }
+
+    function llmEscapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    function llmShowNotification(message, type) {
+        const notification = document.createElement('div');
+        notification.className = `alert alert-${type} position-fixed top-0 end-0 m-3`;
+        notification.style.zIndex = '9999';
+        notification.style.background = type === 'success' ? '#10b981' : '#ef4444';
+        notification.style.color = '#ffffff';
+        notification.innerHTML = message;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 2000);
+    }
+
+    const llmMessageInput = document.getElementById('llmMessageInput');
+    llmMessageInput.addEventListener('keydown', (e) => { 
+        if (e.key === 'Enter' && !e.shiftKey) { 
+            e.preventDefault(); 
+            llmSendMessage(); 
+        } 
+    });
+    window.llmCreateNewSession = llmCreateNewSession;
+    window.llmSwitchSession = llmSwitchSession;
+    window.llmRenameSession = llmRenameSession;
+    window.llmDeleteSession = llmDeleteSession;
+    window.llmClearCurrentSession = llmClearCurrentSession;
+    window.llmSendMessage = llmSendMessage;
+    window.llmStopGeneration = llmStopGeneration;
+    llmInitSocket();
+    llmLoadSessions();
+</script>
