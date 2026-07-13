@@ -1,6 +1,6 @@
 import json
 import os
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, redirect
 from flask_socketio import SocketIO
 from core.event_bus import event_bus
 from core.module_loader import load_modules
@@ -11,6 +11,7 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 main_tabs = []
 settings_tabs = []
+menu_structure = []
 
 def load_global_settings():
     settings = {}
@@ -31,11 +32,13 @@ app.config['SETTINGS'] = load_global_settings()
 
 @app.route('/')
 def index():
-    return render_template('index.html', tabs=main_tabs)
+    return render_template('index.html', 
+                           menu_structure=menu_structure, 
+                           settings_tabs=settings_tabs)
 
 @app.route('/settings')
 def settings_page():
-    return render_template('settings.html', settings_tabs=settings_tabs)
+    return redirect('/')
 
 @app.route('/api/save_all_settings', methods=['POST'])
 def save_all_settings():
@@ -64,7 +67,7 @@ def get_all_settings():
     return jsonify(app.config['SETTINGS'])
 
 def main():
-    global main_tabs, settings_tabs
+    global main_tabs, settings_tabs, menu_structure
     
     modules = load_modules(app, event_bus, socketio)
     
@@ -87,11 +90,61 @@ def main():
         for mod in modules:
             mod.on_load()
     
+    menu_structure = []
+    categories = {}
+    
+    for mod in modules:
+        main_tab_content = None
+        for tab_name, tab_display, tab_content in main_tabs:
+            if tab_name == mod.name:
+                main_tab_content = tab_content
+                break
+        if main_tab_content is None:
+            continue
+        
+        cat = getattr(mod, 'category', None)
+        icon = getattr(mod, 'icon', 'fa-cube')
+        
+        if cat:
+            if cat not in categories:
+                categories[cat] = []
+            categories[cat].append({
+                'id': mod.name,
+                'display_name': mod.display_name,
+                'icon': icon,
+                'content': main_tab_content
+            })
+        else:
+            menu_structure.append({
+                'type': 'module',
+                'id': mod.name,
+                'display_name': mod.display_name,
+                'icon': icon,
+                'content': main_tab_content
+            })
+    
+    for cat, mods in categories.items():
+        if len(mods) == 1:
+            m = mods[0]
+            menu_structure.append({
+                'type': 'module',
+                'id': m['id'],
+                'display_name': m['display_name'],
+                'icon': m['icon'],
+                'content': m['content']
+            })
+        else:
+            menu_structure.append({
+                'type': 'category',
+                'display_name': cat,
+                'modules': mods
+            })
+    
     print("\n" + "=" * 60)
     print("Сервер запущен: http://localhost:5000")
     print("=" * 60 + "\n")
     
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    socketio.run(app, debug=True, use_reloader=False, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
 
 if __name__ == '__main__':
     main()

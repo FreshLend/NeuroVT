@@ -1,0 +1,205 @@
+<div class="row">
+    <div class="col-md-12">
+        <div class="card mb-3">
+            <div class="card-header">Выбор модели</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Модель</label>
+                    <select class="form-select" id="modelSelect"></select>
+                    <small class="text-muted">Модели должны быть помещены в папку <code>modules/Live2D/models/</code> каждая в своей подпапке.</small>
+                </div>
+                <button class="btn btn-primary" id="applyModelBtn">Применить</button>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-12">
+        <div class="card mb-3">
+            <div class="card-header">Настройки эмоций</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Базовая длительность эмоции (сек)</label>
+                    <input type="range" class="form-range" id="durationSlider" min="1" max="30" step="0.5">
+                    <span id="durationValue">3.0</span> сек
+                </div>
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="randomCheckbox">
+                    <label class="form-check-label">Случайная длительность</label>
+                </div>
+                <div id="randomRange" style="display: none;">
+                    <div class="mb-3">
+                        <label class="form-label">От (сек)</label>
+                        <input type="number" class="form-control" id="randomMin" step="0.5" min="1" max="30">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">До (сек)</label>
+                        <input type="number" class="form-control" id="randomMax" step="0.5" min="1" max="30">
+                    </div>
+                </div>
+                <button class="btn btn-secondary" id="saveEmotionSettingsBtn">Сохранить настройки эмоций</button>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-12">
+        <div class="card mb-3">
+            <div class="card-header">Триггеры эмоций</div>
+            <div class="card-body">
+                <div id="triggersTable"></div>
+                <button class="btn btn-primary mt-3" id="saveTriggersBtn">Сохранить триггеры</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentExpressions = [];
+    let currentTriggers = {};
+    let emotionDuration = 3;
+    let emotionRandom = false;
+    let emotionRandomMin = 4;
+    let emotionRandomMax = 10;
+
+    async function loadModels() {
+        const res = await fetch('/api/avatar/live2d/get_models');
+        const data = await res.json();
+        const select = document.getElementById('modelSelect');
+        select.innerHTML = '';
+        for (const m of data.models) {
+            const option = document.createElement('option');
+            option.value = m;
+            option.textContent = m;
+            if (m === data.current) option.selected = true;
+            select.appendChild(option);
+        }
+        if (data.current) {
+            await loadTriggersAndSettings();
+        }
+    }
+
+    async function loadTriggersAndSettings() {
+        const res = await fetch('/api/avatar/live2d/get_triggers');
+        const data = await res.json();
+        currentExpressions = data.expressions || [];
+        currentTriggers = data.triggers || {};
+        emotionDuration = data.emotion_duration || 3;
+        emotionRandom = data.emotion_random || false;
+        emotionRandomMin = data.emotion_random_min || 4;
+        emotionRandomMax = data.emotion_random_max || 10;
+        renderTriggersTable();
+        renderEmotionSettings();
+    }
+
+    function renderTriggersTable() {
+        const container = document.getElementById('triggersTable');
+        if (!currentExpressions.length) {
+            container.innerHTML = '<div class="alert alert-warning">Не найдено файлов .exp3.json в папке модели.</div>';
+            return;
+        }
+        let html = '<table class="table table-dark table-striped"><thead><tr><th>Эмоция</th><th>Ключевые слова (через запятую)</th></tr></thead><tbody>';
+        for (const expr of currentExpressions) {
+            const keywords = currentTriggers[expr] || [];
+            const keywordsStr = keywords.join(', ');
+            html += `<tr>
+                        <td><strong>${escapeHtml(expr)}</strong></td>
+                        <td><input type="text" class="form-control keyword-input" data-expression="${escapeHtml(expr)}" value="${escapeHtml(keywordsStr)}" placeholder="например: радость,смех,ура"></td>
+                     </tr>`;
+        }
+        html += '</tbody></table>';
+        container.innerHTML = html;
+    }
+
+    function renderEmotionSettings() {
+        document.getElementById('durationSlider').value = emotionDuration;
+        document.getElementById('durationValue').innerText = emotionDuration;
+        document.getElementById('randomCheckbox').checked = emotionRandom;
+        document.getElementById('randomRange').style.display = emotionRandom ? 'block' : 'none';
+        document.getElementById('randomMin').value = emotionRandomMin;
+        document.getElementById('randomMax').value = emotionRandomMax;
+    }
+
+    async function saveTriggers() {
+        const newTriggers = {};
+        document.querySelectorAll('.keyword-input').forEach(input => {
+            const expr = input.dataset.expression;
+            const val = input.value;
+            const keywords = val.split(',').map(s => s.trim()).filter(s => s);
+            newTriggers[expr] = keywords;
+        });
+        const res = await fetch('/api/avatar/live2d/save_triggers', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({triggers: newTriggers})
+        });
+        if (res.ok) showNotification('Триггеры сохранены!', 'success');
+        else showNotification('Ошибка сохранения', 'error');
+    }
+
+    async function saveEmotionSettings() {
+        const duration = parseFloat(document.getElementById('durationSlider').value);
+        const random = document.getElementById('randomCheckbox').checked;
+        const randomMin = parseFloat(document.getElementById('randomMin').value);
+        const randomMax = parseFloat(document.getElementById('randomMax').value);
+        const res = await fetch('/api/avatar/live2d/save_emotion_settings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                duration: duration,
+                random: random,
+                random_min: randomMin,
+                random_max: randomMax
+            })
+        });
+        if (res.ok) {
+            showNotification('Настройки эмоций сохранены!', 'success');
+            emotionDuration = duration;
+            emotionRandom = random;
+            emotionRandomMin = randomMin;
+            emotionRandomMax = randomMax;
+        } else {
+            showNotification('Ошибка сохранения', 'error');
+        }
+    }
+
+    document.getElementById('applyModelBtn').addEventListener('click', async () => {
+        const modelName = document.getElementById('modelSelect').value;
+        const res = await fetch('/api/avatar/live2d/set_model', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({model_name: modelName})
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            showNotification('Модель изменена!', 'success');
+            currentExpressions = data.expressions;
+            await loadTriggersAndSettings();
+            renderTriggersTable();
+            renderEmotionSettings();
+        } else {
+            showNotification('Ошибка смены модели', 'error');
+        }
+    });
+
+    document.getElementById('saveTriggersBtn').addEventListener('click', saveTriggers);
+    document.getElementById('saveEmotionSettingsBtn').addEventListener('click', saveEmotionSettings);
+    document.getElementById('durationSlider').addEventListener('input', (e) => {
+        document.getElementById('durationValue').innerText = e.target.value;
+    });
+    document.getElementById('randomCheckbox').addEventListener('change', (e) => {
+        document.getElementById('randomRange').style.display = e.target.checked ? 'block' : 'none';
+    });
+
+    loadModels();
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+    function showNotification(msg, type) {
+        const div = document.createElement('div');
+        div.className = `alert alert-${type} position-fixed top-0 end-0 m-3`;
+        div.style.zIndex = '9999';
+        div.innerHTML = msg;
+        document.body.appendChild(div);
+        setTimeout(() => div.remove(), 2000);
+    }
+</script>

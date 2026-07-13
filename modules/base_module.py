@@ -5,6 +5,8 @@ import inspect
 class BaseModule:
     name = "base_module"
     display_name = "Базовый модуль"
+    category = None
+    icon = "fa-cube"
     
     def __init__(self, app, event_bus, socketio):
         self.app = app

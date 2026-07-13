@@ -127,7 +127,6 @@ NeuroVT/
 └── templates/              # Общие шаблоны
     ├── base.html
     ├── index.html
-    └── settings.html
 ```
 
 ---
@@ -269,6 +268,8 @@ from flask import jsonify
 class MyModule(BaseModule):
     name = "my_module"
     display_name = "Мой модуль"
+    category = "Категория"
+    icon = "fa-box" # иконка
     
     def register_routes(self):
         @self.app.route('/api/my_module/hello')

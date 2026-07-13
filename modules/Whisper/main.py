@@ -12,6 +12,8 @@ from faster_whisper import WhisperModel
 class Whisper(BaseModule):
     name = "Whisper"
     display_name = "STT (Faster-Whisper)"
+    category = "STT"
+    icon = "fa-user"
 
     def __init__(self, app, event_bus, socketio):
         super().__init__(app, event_bus, socketio)

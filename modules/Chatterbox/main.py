@@ -16,6 +16,8 @@ from chatterbox.mtl_tts import ChatterboxMultilingualTTS
 class Chatterbox(BaseModule):
     name = "Chatterbox"
     display_name = "TTS (Chatterbox)"
+    category = "TTS"
+    icon = "fa-volume-up"
 
     OUTPUT_MODES = {
         "speakers": "Только динамики",

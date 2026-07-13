@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>NeuroVT - Аватар</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: transparent; }
+        canvas { display: block; }
+        #status { position: absolute; bottom: 10px; left: 10px; background: rgba(0,0,0,0.5); padding: 4px 8px; border-radius: 4px; font-size: 11px; z-index: 10; pointer-events: none; color: #aaa; }
+    </style>
+    <script src="/avatar/live2d/static/pixi.min.js"></script>
+    <script src="/avatar/live2d/static/live2dcubismcore.min.js"></script>
+    <script src="/avatar/live2d/static/cubism4.min.js"></script>
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+</head>
+<body>
+    <div id="status">Загрузка...</div>
+    <canvas id="canvas"></canvas>
+    <script>
+        let app = null;
+        let model = null;
+        let internalModel = null;
+        let currentModelUrl = "{{ model_url }}";
+        let currentModelName = "{{ model_name }}";
+
+        let expressions = new Map();
+        let activeExpressions = new Map();
+        let triggers = {};
+        let emotionDuration = 6.0;
+        let emotionRandom = false;
+        let emotionRandomMin = 4.0;
+        let emotionRandomMax = 10.0;
+
+        const socket = io();
+        const basePath = currentModelUrl.substring(0, currentModelUrl.lastIndexOf('/') + 1);
+
+        socket.on('avatar_triggers_updated', (data) => {
+            if (data.model_name === currentModelName) {
+                triggers = data.triggers;
+                emotionDuration = data.emotion_duration || 6;
+                emotionRandom = data.emotion_random || false;
+                emotionRandomMin = data.emotion_random_min || 4;
+                emotionRandomMax = data.emotion_random_max || 10;
+                console.log("Настройки эмоций:", { emotionDuration, emotionRandom, emotionRandomMin, emotionRandomMax });
+                console.log("Триггеры обновлены:", triggers);
+            }
+        });
+
+        socket.on('avatar_model_changed', (data) => {
+            if (data.model_name !== currentModelName) location.reload();
+        });
+
+        socket.on('avatar_tts_text', (data) => {
+            const text = data.text || '';
+            if (text && model) processTextForTriggers(text);
+        });
+
+        function processTextForTriggers(text) {
+            const lowerText = text.toLowerCase();
+            for (const [emotion, keywords] of Object.entries(triggers)) {
+                if (!keywords.length) continue;
+                for (const kw of keywords) {
+                    if (lowerText.includes(kw.toLowerCase())) {
+                        console.log(`Сработал триггер: "${kw}" -> эмоция ${emotion}`);
+                        activateEmotion(emotion);
+                        break;
+                    }
+                }
+            }
+        }
+
+        function getEmotionDuration() {
+            if (emotionRandom && emotionRandomMin < emotionRandomMax) {
+                const min = emotionRandomMin;
+                const max = emotionRandomMax;
+                return min + Math.random() * (max - min);
+            }
+            return emotionDuration;
+        }
+
+        function activateEmotion(emotionName) {
+            if (!expressions.has(emotionName)) {
+                console.warn(`Эмоция "${emotionName}" не найдена`);
+                return;
+            }
+            if (activeExpressions.has(emotionName)) {
+                const old = activeExpressions.get(emotionName);
+                if (old.timer) clearTimeout(old.timer);
+            }
+            if (!activeExpressions.has(emotionName)) {
+                activeExpressions.set(emotionName, { weight: 0, active: true, timer: null });
+            }
+            const entry = activeExpressions.get(emotionName);
+            entry.active = true;
+            entry.weight = 1.0;
+            const duration = getEmotionDuration();
+            const timer = setTimeout(() => {
+                const e = activeExpressions.get(emotionName);
+                if (e) e.active = false;
+                activeExpressions.delete(emotionName);
+            }, duration * 1000);
+            entry.timer = timer;
+            console.log(`Эмоция ${emotionName} активирована на ${duration.toFixed(1)} сек`);
+        }
+
+        async function loadExpressionsFromModel() {
+            const res = await fetch('/api/avatar/live2d/get_triggers');
+            const data = await res.json();
+            const expNames = data.expressions || [];
+            for (const name of expNames) {
+                const file = name + '.exp3.json';
+                const url = basePath + file;
+                try {
+                    const response = await fetch(url);
+                    if (response.ok) {
+                        const expData = await response.json();
+                        expressions.set(name, { file, data: expData });
+                        console.log(`Загружена эмоция: ${name}`);
+                    } else {
+                        console.warn(`Не удалось загрузить ${url}`);
+                    }
+                } catch(e) {
+                    console.error(`Ошибка загрузки ${url}:`, e);
+                }
+            }
+        }
+
+        function setupExpressionHook() {
+            internalModel.on('beforeModelUpdate', () => {
+                const core = internalModel.coreModel;
+                if (!core) return;
+                const pIds = core._model.parameters.ids;
+                for (let [name, entry] of activeExpressions.entries()) {
+                    const exp = expressions.get(name);
+                    if (!exp || !exp.data) continue;
+                    let weight = entry.weight;
+                    if (!entry.active) {
+                        weight = Math.max(0, weight - 0.05);
+                        entry.weight = weight;
+                        if (weight === 0) {
+                            activeExpressions.delete(name);
+                            continue;
+                        }
+                    } else {
+                        entry.weight = Math.min(1, weight + 0.1);
+                        weight = entry.weight;
+                    }
+                    const params = exp.data.Parameters;
+                    if (!params) continue;
+                    for (const p of params) {
+                        const idx = pIds.indexOf(p.Id);
+                        if (idx === -1) continue;
+                        const targetVal = p.Value;
+                        const blend = p.Blend || "Add";
+                        const currentVal = core.getParameterValueByIndex(idx);
+                        let newVal;
+                        if (blend === "Add") {
+                            newVal = currentVal + targetVal * weight;
+                        } else if (blend === "Multiply") {
+                            newVal = currentVal * (1.0 + (targetVal - 1.0) * weight);
+                        } else {
+                            newVal = currentVal + (targetVal - currentVal) * weight;
+                        }
+                        core.setParameterValueByIndex(idx, newVal);
+                    }
+                }
+            });
+        }
+
+        async function loadModel() {
+            try {
+                if (!currentModelUrl) {
+                    document.getElementById('status').innerHTML = "Модель не выбрана";
+                    return;
+                }
+                const trigRes = await fetch('/api/avatar/live2d/get_triggers');
+                const trigData = await trigRes.json();
+                triggers = trigData.triggers || {};
+                emotionDuration = trigData.emotion_duration || 6;
+                emotionRandom = trigData.emotion_random || false;
+                emotionRandomMin = trigData.emotion_random_min || 4;
+                emotionRandomMax = trigData.emotion_random_max || 10;
+                console.log("Настройки эмоций:", { emotionDuration, emotionRandom, emotionRandomMin, emotionRandomMax });
+
+                app = new PIXI.Application({
+                    view: document.getElementById('canvas'),
+                    autoStart: true,
+                    resizeTo: window,
+                    backgroundAlpha: 0
+                });
+                document.getElementById('status').innerHTML = "Загрузка модели...";
+                model = await PIXI.live2d.Live2DModel.from(currentModelUrl, { autoFocus: false });
+                internalModel = model.internalModel;
+
+                await loadExpressionsFromModel();
+                setupExpressionHook();
+
+                const scale = (window.innerHeight * 0.75) / model.height;
+                model.scale.set(scale);
+                model.x = window.innerWidth / 2;
+                model.y = window.innerHeight / 2;
+                model.anchor.set(0.5, 0.5);
+                app.stage.addChild(model);
+
+                let dragging = false, dragData = null, dragOffset = {x:0, y:0};
+                model.interactive = true;
+                model.buttonMode = true;
+                model.on('pointerdown', (e) => {
+                    dragging = true;
+                    dragData = e.data;
+                    const pos = dragData.getLocalPosition(model.parent);
+                    dragOffset.x = model.x - pos.x;
+                    dragOffset.y = model.y - pos.y;
+                });
+                model.on('pointermove', () => {
+                    if (dragging && dragData) {
+                        const pos = dragData.getLocalPosition(model.parent);
+                        model.x = pos.x + dragOffset.x;
+                        model.y = pos.y + dragOffset.y;
+                    }
+                });
+                model.on('pointerup', () => { dragging = false; dragData = null; });
+                model.on('pointerupoutside', () => { dragging = false; dragData = null; });
+
+                window.addEventListener('wheel', (e) => {
+                    if (!model) return;
+                    let ns = model.scale.x;
+                    ns += e.deltaY < 0 ? ns * 0.1 : -ns * 0.1;
+                    ns = Math.min(2.5, Math.max(0.1, ns));
+                    model.scale.set(ns);
+                });
+
+                document.getElementById('status').innerHTML = "Готово";
+                setTimeout(() => {
+                    document.getElementById('status').style.opacity = '0';
+                    setTimeout(() => document.getElementById('status').style.display = 'none', 2000);
+                }, 2000);
+            } catch (err) {
+                console.error(err);
+                document.getElementById('status').innerHTML = `Ошибка: ${err.message}`;
+            }
+        }
+        loadModel();
+    </script>
+</body>
+</html>

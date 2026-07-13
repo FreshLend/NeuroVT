@@ -1,33 +1,74 @@
 {% extends "base.html" %}
 
+{% block sidebar %}
+    {% for item in menu_structure %}
+        {% if item.type == 'module' %}
+            <button class="btn btn-sidebar" data-target="module-{{ item.id }}" onclick="showContent('module-{{ item.id }}')">
+                <i class="fas {{ item.icon }}"></i>
+                <span class="btn-text">{{ item.display_name }}</span>
+            </button>
+        {% elif item.type == 'category' %}
+            <div class="sidebar-category">
+                <button class="btn btn-sidebar btn-category" data-bs-toggle="collapse" data-bs-target="#cat-{{ loop.index }}">
+                    <i class="fas fa-folder"></i>
+                    <span class="btn-text">{{ item.display_name }}</span>
+                    <i class="fas fa-chevron-down ms-auto"></i>
+                </button>
+                <div class="collapse" id="cat-{{ loop.index }}">
+                    {% for mod in item.modules %}
+                        <button class="btn btn-sidebar btn-sub" data-target="module-{{ mod.id }}" onclick="showContent('module-{{ mod.id }}')">
+                            <i class="fas {{ mod.icon }}"></i>
+                            <span class="btn-text">{{ mod.display_name }}</span>
+                        </button>
+                    {% endfor %}
+                </div>
+            </div>
+        {% endif %}
+    {% endfor %}
+{% endblock %}
+
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <ul class="nav nav-tabs mb-4" id="mainTabs" role="tablist">
-            {% for tab_id, tab_name, _ in tabs %}
+    {% for item in menu_structure %}
+        {% if item.type == 'module' %}
+            <div id="module-{{ item.id }}" class="module-content">
+                {{ item.content|safe }}
+            </div>
+        {% elif item.type == 'category' %}
+            {% for mod in item.modules %}
+                <div id="module-{{ mod.id }}" class="module-content">
+                    {{ mod.content|safe }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endfor %}
+
+    <div id="settings-content" class="module-content">
+        <ul class="nav nav-tabs mb-4" id="settingsTabs" role="tablist">
+            {% for tab_id, tab_name, _ in settings_tabs %}
             <li class="nav-item" role="presentation">
                 <button class="nav-link {% if loop.first %}active{% endif %}" 
-                        id="tab-{{ tab_id }}-btn" 
+                        id="settings-tab-{{ tab_id }}" 
                         data-bs-toggle="tab" 
-                        data-bs-target="#tab-{{ tab_id }}" 
+                        data-bs-target="#settings-pane-{{ tab_id }}" 
                         type="button" 
                         role="tab">
-                    <i class="fas fa-{% if tab_name == 'Чат с AI' %}comment{% elif tab_name == 'YouTube чат' %}youtube{% else %}plug{% endif %} me-2"></i>
                     {{ tab_name }}
                 </button>
             </li>
             {% endfor %}
         </ul>
-        
-        <div class="tab-content" id="mainTabsContent">
-            {% for tab_id, tab_name, content in tabs %}
+        <div class="tab-content">
+            {% for tab_id, _, content in settings_tabs %}
             <div class="tab-pane fade {% if loop.first %}show active{% endif %}" 
-                 id="tab-{{ tab_id }}" 
+                 id="settings-pane-{{ tab_id }}" 
                  role="tabpanel">
-                {{ content|safe }}
+                <div class="card">
+                    <div class="card-body">
+                        {{ content|safe }}
+                    </div>
+                </div>
             </div>
             {% endfor %}
         </div>
     </div>
-</div>
 {% endblock %}

@@ -14,6 +14,8 @@ from cryptography.fernet import Fernet
 class OpenAICompatible(BaseModule):
     name = "OpenAi_Compatible"
     display_name = "LLM (OpenAI Compatible)"
+    category = "LLM"
+    icon = "fa-brain"
 
     FALLBACK_RESPONSES = [
         "Кто-нибудь, скажите моему разработчику, что у меня проблемы с головой.",
@@ -407,6 +409,8 @@ class OpenAICompatible(BaseModule):
                     "X-Title": self.site_name,
                 }
             )
+            if not completion.choices:
+                raise ValueError("API вернул пустой список choices")
             response = completion.choices[0].message.content
             if response is None:
                 response = ""
@@ -649,21 +653,21 @@ class OpenAICompatible(BaseModule):
                 })
                 return jsonify({"status": "ok", "model": new_model})
             return jsonify({"error": "Модель не найдена"}), 400
-        
+
         @self.app.route('/api/llm/openai_compatible/chat_stream', methods=['POST'])
         def llm_chat_stream():
             data = request.json
             user_message = data.get('message', '')
             session_id = data.get('session_id', self.current_session_id)
             is_guest = data.get('is_guest', False)
-            
+
             if not user_message:
                 return jsonify({"error": "Пустое сообщение"}), 400
-            
+
             final_message = user_message
             if is_guest:
                 final_message = f"{self.guest_prefix}{user_message}"
-            
+
             def generate():
                 full_response = ""
                 try:
@@ -683,12 +687,12 @@ class OpenAICompatible(BaseModule):
                             for msg in history:
                                 api_messages.append({"role": msg['role'], "content": msg['content']})
                             api_messages.append({"role": "user", "content": final_message})
-                            
+
                             max_context_tokens = self.context_token_limit - self.max_tokens - 200
                             if max_context_tokens < 100:
                                 max_context_tokens = 100
                             trimmed_messages, _ = self.trim_messages_by_tokens(api_messages, max_context_tokens)
-                            
+
                             stream = self.client.chat.completions.create(
                                 model=self.model,
                                 messages=trimmed_messages,
@@ -700,25 +704,27 @@ class OpenAICompatible(BaseModule):
                                     "X-Title": self.site_name,
                                 }
                             )
-                            
+
                             for chunk in stream:
+                                if not chunk.choices:
+                                    continue
                                 if chunk.choices[0].delta.content is not None:
                                     content = chunk.choices[0].delta.content
                                     full_response += content
                                     yield f"data: {json.dumps({'chunk': content})}\n\n"
-                            
+
                             self.last_api_error = None
-                            
+
                     if full_response.strip():
                         self.add_message_to_session(session_id, 'user', final_message, is_guest=is_guest)
                         self.add_message_to_session(session_id, 'assistant', full_response, is_guest=False)
-                        
+
                         self.event_bus.emit("tts_speak", {
                             "text": full_response,
                             "source": "openai_compatible",
                             "timestamp": datetime.now().isoformat()
                         })
-                        
+
                         self.socketio.emit('llm_new_message', {
                             'session_id': session_id,
                             'new_messages': [
@@ -726,18 +732,18 @@ class OpenAICompatible(BaseModule):
                                 {'role': 'assistant', 'content': full_response, 'is_guest': False}
                             ]
                         })
-                    
+
                     yield f"data: {json.dumps({'done': True, 'full_response': full_response})}\n\n"
-                    
+
                 except Exception as e:
                     error_msg = str(e)
                     self.last_api_error = error_msg
                     print(f"[LLM] Ошибка API: {error_msg}")
-                    
+
                     if full_response.strip():
                         self.add_message_to_session(session_id, 'user', final_message, is_guest=is_guest)
                         self.add_message_to_session(session_id, 'assistant', full_response, is_guest=False)
-                        
+
                         self.socketio.emit('llm_new_message', {
                             'session_id': session_id,
                             'new_messages': [
@@ -750,14 +756,14 @@ class OpenAICompatible(BaseModule):
                         fallback = self.generate_fallback(final_message)
                         yield f"data: {json.dumps({'chunk': fallback, 'error': error_msg})}\n\n"
                         full_response = fallback
-                        
+
                         self.add_message_to_session(session_id, 'user', final_message, is_guest=is_guest)
                         self.add_message_to_session(session_id, 'assistant', full_response, is_guest=False)
-                        
+
                         yield f"data: {json.dumps({'done': True, 'full_response': full_response})}\n\n"
-            
+
             return Response(stream_with_context(generate()), mimetype='text/event-stream')
-        
+
         @self.app.route('/api/llm/openai_compatible/save_partial', methods=['POST'])
         def save_partial_response():
             data = request.json
@@ -765,16 +771,16 @@ class OpenAICompatible(BaseModule):
             partial_text = data.get('partial_text', '')
             user_message = data.get('user_message', '')
             is_guest = data.get('is_guest', False)
-            
+
             if not session_id or not partial_text or not user_message:
                 return jsonify({"error": "Недостаточно данных"}), 400
-            
+
             if session_id not in self.sessions:
                 return jsonify({"error": "Сессия не найдена"}), 404
-            
+
             self.add_message_to_session(session_id, 'user', user_message, is_guest=is_guest)
             self.add_message_to_session(session_id, 'assistant', partial_text, is_guest=False)
-            
+
             self.socketio.emit('llm_new_message', {
                 'session_id': session_id,
                 'new_messages': [
@@ -782,7 +788,7 @@ class OpenAICompatible(BaseModule):
                     {'role': 'assistant', 'content': partial_text, 'is_guest': False}
                 ]
             })
-            
+
             return jsonify({"status": "ok"})
 
     def register_main_tab(self):

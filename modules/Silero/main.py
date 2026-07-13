@@ -13,6 +13,8 @@ from datetime import datetime
 class Silero(BaseModule):
     name = "Silero"
     display_name = "TTS (Silero)"
+    category = "TTS"
+    icon = "fa-volume-up"
     
     VOICES = {
         "aidar": "Айдар (мужской)",
